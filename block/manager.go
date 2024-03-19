@@ -27,6 +27,8 @@ import (
 	"github.com/rollkit/rollkit/store"
 	"github.com/rollkit/rollkit/third_party/log"
 	"github.com/rollkit/rollkit/types"
+
+	"github.com/rollkit/rollkit/da/bitcoin"
 )
 
 // defaultDABlockTime is used only if DABlockTime is not configured for manager
@@ -86,6 +88,10 @@ type Manager struct {
 	dalc *da.DAClient
 	// daHeight is the height of the latest processed DA block
 	daHeight uint64
+
+	btc *bitcoin.BitcoinClient
+	// btcHeight is the height of the latest processed Bitcoin block
+	btcHeight uint64
 
 	HeaderCh chan *types.SignedHeader
 	BlockCh  chan *types.Block
@@ -154,6 +160,7 @@ func NewManager(
 	mempool mempool.Mempool,
 	proxyApp proxy.AppConnConsensus,
 	dalc *da.DAClient,
+	btc *bitcoin.BitcoinClient,
 	eventBus *cmtypes.EventBus,
 	logger log.Logger,
 	blockStore *goheaderstore.Store[*types.Block],
@@ -241,6 +248,7 @@ func NewManager(
 		executor:    exec,
 		dalc:        dalc,
 		daHeight:    s.DAHeight,
+		btc:         btc,
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
 		HeaderCh:      make(chan *types.SignedHeader, channelLength),
 		BlockCh:       make(chan *types.Block, channelLength),
@@ -272,6 +280,11 @@ func getAddress(key crypto.PrivKey) ([]byte, error) {
 // SetDALC is used to set DataAvailabilityLayerClient used by Manager.
 func (m *Manager) SetDALC(dalc *da.DAClient) {
 	m.dalc = dalc
+}
+
+// SetBitcoinClient is used to set BitcoinClient used by Manager.
+func (m *Manager) SetBitcoinClient(btc *bitcoin.BitcoinClient) {
+	m.btc = btc
 }
 
 // isProposer returns whether or not the manager is a proposer

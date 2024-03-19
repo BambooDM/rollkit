@@ -30,6 +30,7 @@ import (
 	"github.com/rollkit/rollkit/block"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/da/bitcoin"
 	"github.com/rollkit/rollkit/mempool"
 	"github.com/rollkit/rollkit/p2p"
 	"github.com/rollkit/rollkit/state"
@@ -70,6 +71,7 @@ type FullNode struct {
 	proxyApp     proxy.AppConns
 	eventBus     *cmtypes.EventBus
 	dalc         *da.DAClient
+	btc          *bitcoin.BitcoinClient
 	p2pClient    *p2p.Client
 	hSyncService *block.HeaderSyncService
 	bSyncService *block.BlockSyncService
@@ -137,6 +139,11 @@ func newFullNode(
 		return nil, err
 	}
 
+	btc, err := initBitcoinClient(logger)
+	if err != nil {
+		return nil, err
+	}
+
 	p2pClient, err := p2p.NewClient(nodeConfig.P2P, p2pKey, genesis.ChainID, baseKV, logger.With("module", "p2p"), p2pMetrics)
 	if err != nil {
 		return nil, err
@@ -156,7 +163,7 @@ func newFullNode(
 	mempool := initMempool(logger, proxyApp, memplMetrics)
 
 	store := store.New(mainKV)
-	blockManager, err := initBlockManager(signingKey, nodeConfig, genesis, store, mempool, proxyApp, dalc, eventBus, logger, blockSyncService, seqMetrics, smMetrics)
+	blockManager, err := initBlockManager(signingKey, nodeConfig, genesis, store, mempool, proxyApp, dalc, btc, eventBus, logger, blockSyncService, seqMetrics, smMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +182,7 @@ func newFullNode(
 		p2pClient:      p2pClient,
 		blockManager:   blockManager,
 		dalc:           dalc,
+		btc:            btc,
 		Mempool:        mempool,
 		mempoolIDs:     newMempoolIDs(),
 		Store:          store,
@@ -258,8 +266,8 @@ func initBlockSyncService(ctx context.Context, mainKV ds.TxnDatastore, nodeConfi
 	return blockSyncService, nil
 }
 
-func initBlockManager(signingKey crypto.PrivKey, nodeConfig config.NodeConfig, genesis *cmtypes.GenesisDoc, store store.Store, mempool mempool.Mempool, proxyApp proxy.AppConns, dalc *da.DAClient, eventBus *cmtypes.EventBus, logger log.Logger, blockSyncService *block.BlockSyncService, seqMetrics *block.Metrics, execMetrics *state.Metrics) (*block.Manager, error) {
-	blockManager, err := block.NewManager(signingKey, nodeConfig.BlockManagerConfig, genesis, store, mempool, proxyApp.Consensus(), dalc, eventBus, logger.With("module", "BlockManager"), blockSyncService.BlockStore(), seqMetrics, execMetrics)
+func initBlockManager(signingKey crypto.PrivKey, nodeConfig config.NodeConfig, genesis *cmtypes.GenesisDoc, store store.Store, mempool mempool.Mempool, proxyApp proxy.AppConns, dalc *da.DAClient, btc *bitcoin.BitcoinClient, eventBus *cmtypes.EventBus, logger log.Logger, blockSyncService *block.BlockSyncService, seqMetrics *block.Metrics, execMetrics *state.Metrics) (*block.Manager, error) {
+	blockManager, err := block.NewManager(signingKey, nodeConfig.BlockManagerConfig, genesis, store, mempool, proxyApp.Consensus(), dalc, btc, eventBus, logger.With("module", "BlockManager"), blockSyncService.BlockStore(), seqMetrics, execMetrics)
 	if err != nil {
 		return nil, fmt.Errorf("error while initializing BlockManager: %w", err)
 	}
