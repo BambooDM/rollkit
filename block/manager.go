@@ -71,6 +71,10 @@ type NewBlockEvent struct {
 	DAHeight uint64
 }
 
+// NewBtcBlockEvent is used to fetch bitcoin block to btcBlockInCh
+type NewBtcBlockEvent struct {
+}
+
 // Manager is responsible for aggregating transactions into blocks.
 type Manager struct {
 	lastState types.State
@@ -105,7 +109,8 @@ type Manager struct {
 	blockStoreCh chan struct{}
 
 	// retrieveCond is used to notify sync goroutine (SyncLoop) that it needs to retrieve data
-	retrieveCh chan struct{}
+	retrieveCh    chan struct{}
+	retrieveBtcCh chan struct{}
 
 	logger log.Logger
 
@@ -213,6 +218,8 @@ func NewManager(
 	}
 	// allow buffer for the block header and protocol encoding
 	maxBlobSize -= blockProtocolOverhead
+
+	// TODO: do I need to determine bitcoin max block size here?
 
 	exec := state.NewBlockExecutor(proposerAddress, genesis.ChainID, mempool, proxyApp, eventBus, maxBlobSize, logger, execMetrics, valSet.Hash())
 	if s.LastBlockHeight+1 == uint64(genesis.InitialHeight) {
@@ -442,6 +449,8 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 			m.sendNonBlockingSignalToBlockStoreCh()
 			m.sendNonBlockingSignalToRetrieveCh()
 
+			// TODO: how trySyncNextBlock function relates to daHeight
+			// how bitcoin relates here?
 			err := m.trySyncNextBlock(ctx, daHeight)
 			if err != nil {
 				m.logger.Info("failed to sync next block", "error", err)
@@ -464,6 +473,13 @@ func (m *Manager) sendNonBlockingSignalToBlockStoreCh() {
 func (m *Manager) sendNonBlockingSignalToRetrieveCh() {
 	select {
 	case m.retrieveCh <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) sendNonBlockingSignalToRetrieveBtcCh() {
+	select {
+	case m.retrieveBtcCh <- struct{}{}:
 	default:
 	}
 }
@@ -530,7 +546,7 @@ func (m *Manager) trySyncNextBlock(ctx context.Context, daHeight uint64) error {
 	}
 }
 
-// BlockStoreRetrieveLoop is responsible for retrieving blocks from the Block Store.
+// BlockStoreRetrieveLoop is responsible for retrieving ipfs blocks from the Block Store.
 func (m *Manager) BlockStoreRetrieveLoop(ctx context.Context) {
 	lastBlockStoreHeight := uint64(0)
 	for {
@@ -618,6 +634,36 @@ func (m *Manager) RetrieveLoop(ctx context.Context) {
 	}
 }
 
+// RetrieveBitcoinLoop is responsible for retrieving bitcoin block for further interactions
+func (m *Manager) BtcRetrieveLoop(ctx context.Context) {
+	// blockFoundCh is used to track when we successfully found a block so
+	// that we can continue to try and find blocks that are in the next DA height.
+	// This enables syncing faster than the DA block time.
+	blockFoundCh := make(chan struct{}, 1)
+	defer close(blockFoundCh)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.retrieveBtcCh:
+		case <-blockFoundCh:
+		}
+		daHeight := atomic.LoadUint64(&m.daHeight)
+		err := m.processNextDABlock(ctx)
+		if err != nil && ctx.Err() == nil {
+			m.logger.Error("failed to retrieve block from DALC", "daHeight", daHeight, "errors", err.Error())
+			continue
+		}
+		// Signal the blockFoundCh to try and retrieve the next block
+		select {
+		case blockFoundCh <- struct{}{}:
+		default:
+		}
+		atomic.AddUint64(&m.daHeight, 1)
+	}
+}
+
+// fetch only next DA block
 func (m *Manager) processNextDABlock(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -690,6 +736,15 @@ func (m *Manager) fetchBlock(ctx context.Context, daHeight uint64) (da.ResultRet
 	var err error
 	blockRes := m.dalc.RetrieveBlocks(ctx, daHeight)
 	if blockRes.Code == da.StatusError {
+		err = fmt.Errorf("failed to retrieve block: %s", blockRes.Message)
+	}
+	return blockRes, err
+}
+
+func (m *Manager) fetchBtcBlock(ctx context.Context, btcHeight int64) (bitcoin.ResultRetrieveBlocks, error) {
+	var err error
+	blockRes := m.btc.RetrieveBlocks(ctx, btcHeight)
+	if blockRes.Code == bitcoin.StatusError {
 		err = fmt.Errorf("failed to retrieve block: %s", blockRes.Message)
 	}
 	return blockRes, err

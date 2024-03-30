@@ -1,0 +1,12 @@
+syntax = "proto3";
+package bitcoin;
+option go_package = "github.com/rollkit/rollkit/da/bitcoin";
+
+message RollUpsBlock {
+    bytes block_proofs = 1;
+    bytes tx_order_proofs = 2;
+} 
+
+message StateProofs {
+    repeated RollUpsBlock blocks = 1; 
+}

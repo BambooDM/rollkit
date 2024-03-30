@@ -139,7 +139,7 @@ func newFullNode(
 		return nil, err
 	}
 
-	btc, err := initBitcoinClient(logger)
+	btc, err := InitBitcoinClient(nodeConfig, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -396,6 +396,7 @@ func (n *FullNode) OnStart() error {
 		return nil
 	}
 	n.threadManager.Go(func() { n.blockManager.RetrieveLoop(n.ctx) })
+	n.threadManager.Go(func() { n.blockManager.BtcRetrieveLoop(n.ctx) })
 	n.threadManager.Go(func() { n.blockManager.BlockStoreRetrieveLoop(n.ctx) })
 	n.threadManager.Go(func() { n.blockManager.SyncLoop(n.ctx, n.cancel) })
 	return nil
