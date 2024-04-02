@@ -29,6 +29,7 @@ import (
 	"github.com/rollkit/rollkit/types"
 
 	"github.com/rollkit/rollkit/da/bitcoin"
+	btctypes "github.com/rollkit/rollkit/types/pb/bitcoin"
 )
 
 // defaultDABlockTime is used only if DABlockTime is not configured for manager
@@ -73,6 +74,8 @@ type NewBlockEvent struct {
 
 // NewBtcBlockEvent is used to fetch bitcoin block to btcBlockInCh
 type NewBtcBlockEvent struct {
+	Block     *btctypes.RollUpsBlock
+	BtcHeight uint64
 }
 
 // Manager is responsible for aggregating transactions into blocks.
@@ -100,10 +103,12 @@ type Manager struct {
 	HeaderCh chan *types.SignedHeader
 	BlockCh  chan *types.Block
 
-	blockInCh  chan NewBlockEvent
-	blockStore *goheaderstore.Store[*types.Block]
+	blockInCh    chan NewBlockEvent
+	btcBlockInCh chan NewBtcBlockEvent
+	blockStore   *goheaderstore.Store[*types.Block]
 
-	blockCache *BlockCache
+	blockCache    *BlockCache
+	btcBlockCache *BtcBlockCache
 
 	// blockStoreCh is used to notify sync goroutine (SyncLoop) that it needs to retrieve blocks from blockStore
 	blockStoreCh chan struct{}
@@ -260,11 +265,13 @@ func NewManager(
 		HeaderCh:      make(chan *types.SignedHeader, channelLength),
 		BlockCh:       make(chan *types.Block, channelLength),
 		blockInCh:     make(chan NewBlockEvent, blockInChLength),
+		btcBlockInCh:  make(chan NewBtcBlockEvent, channelLength),
 		blockStoreCh:  make(chan struct{}, 1),
 		blockStore:    blockStore,
 		lastStateMtx:  new(sync.RWMutex),
 		blockCache:    NewBlockCache(),
 		retrieveCh:    make(chan struct{}, 1),
+		retrieveBtcCh: make(chan struct{}, 1),
 		logger:        logger,
 		validatorSet:  &valSet,
 		txsAvailable:  txsAvailableCh,
@@ -321,6 +328,11 @@ func (m *Manager) GetStoreHeight() uint64 {
 // GetBlockInCh returns the manager's blockInCh
 func (m *Manager) GetBlockInCh() chan NewBlockEvent {
 	return m.blockInCh
+}
+
+// GetBtcBlockInCh returns the manager's btcBlockInCh
+func (m *Manager) GetBtcBlockInCh() chan NewBtcBlockEvent {
+	return m.btcBlockInCh
 }
 
 // IsBlockHashSeen returns true if the block with the given hash has been seen.
@@ -423,12 +435,16 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 	defer daTicker.Stop()
 	blockTicker := time.NewTicker(m.conf.BlockTime)
 	defer blockTicker.Stop()
+	btcTicker := time.NewTicker(m.conf.BtcBlockTime)
+	defer btcTicker.Stop()
 	for {
 		select {
 		case <-daTicker.C:
 			m.sendNonBlockingSignalToRetrieveCh()
 		case <-blockTicker.C:
 			m.sendNonBlockingSignalToBlockStoreCh()
+		case <-btcTicker.C:
+			m.sendNonBlockingSignalToRetrieveBtcCh()
 		case blockEvent := <-m.blockInCh:
 			// Only validated blocks are sent to blockInCh, so we can safely assume that blockEvent.block is valid
 			block := blockEvent.Block
@@ -449,14 +465,34 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 			m.sendNonBlockingSignalToBlockStoreCh()
 			m.sendNonBlockingSignalToRetrieveCh()
 
-			// TODO: how trySyncNextBlock function relates to daHeight
-			// how bitcoin relates here?
 			err := m.trySyncNextBlock(ctx, daHeight)
 			if err != nil {
 				m.logger.Info("failed to sync next block", "error", err)
 				continue
 			}
 			m.blockCache.setSeen(blockHash)
+		// handle retrieved blocks from bitcoin
+		case btcBlockEvent := <-m.btcBlockInCh:
+			block := btcBlockEvent.Block
+			blockHash := string(block.BlockProofs)
+			blockHeight := block.Height
+			btcHeight := btcBlockEvent.BtcHeight
+			m.logger.Debug("block body retrieved from bitcoin",
+				"height", blockHeight,
+				"btcHeight", btcHeight,
+				"hash", blockHash,
+			)
+			if blockHeight <= m.store.BtcRollupsHeight() || m.btcBlockCache.isSeen(blockHash) {
+				m.logger.Debug("block already seen", "height", blockHeight, "block hash", blockHash)
+				continue
+			}
+			m.btcBlockCache.setBlock(blockHeight, block)
+
+			m.sendNonBlockingSignalToRetrieveBtcCh()
+
+			// proofs from bitcoin are used for verification, it needs to work along side block syncing
+			// block syncing process will fetch stored roll ups block to compare results
+
 		case <-ctx.Done():
 			return
 		}
@@ -648,19 +684,90 @@ func (m *Manager) BtcRetrieveLoop(ctx context.Context) {
 		case <-m.retrieveBtcCh:
 		case <-blockFoundCh:
 		}
-		daHeight := atomic.LoadUint64(&m.daHeight)
-		err := m.processNextDABlock(ctx)
+
+		btcHeight := atomic.LoadUint64(&m.btcHeight)
+		err := m.processNextBitcoinBlock(ctx)
 		if err != nil && ctx.Err() == nil {
-			m.logger.Error("failed to retrieve block from DALC", "daHeight", daHeight, "errors", err.Error())
+			m.logger.Error("failed to retrieve block from bitcoin", "height", btcHeight, "errors", err.Error())
 			continue
 		}
+
 		// Signal the blockFoundCh to try and retrieve the next block
 		select {
 		case blockFoundCh <- struct{}{}:
 		default:
 		}
-		atomic.AddUint64(&m.daHeight, 1)
+		atomic.AddUint64(&m.btcHeight, 1)
 	}
+}
+
+// fetch only next bitcoin block
+func (m *Manager) processNextBitcoinBlock(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	maxRetries := 10
+	btcHeight := atomic.LoadUint64(&m.btcHeight)
+
+	var err error
+	m.logger.Debug("trying to retrieve block from bitcoin", "btcHeight", btcHeight)
+	for r := 0; r < maxRetries; r++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		blockResp, fetchErr := m.fetchBtcBlock(ctx, btcHeight)
+		if blockResp.Code == bitcoin.StatusNotFound {
+			m.logger.Debug("no block found", "btcHeight", btcHeight, "reason", blockResp.Message)
+			return nil
+		}
+
+		if fetchErr == nil {
+			m.logger.Debug("retrieved block", blockResp.Block, "btcHeight", btcHeight)
+			if !m.isUsingExpectedBtcCentralizedSequencer() {
+				continue
+			}
+
+			stateProofs, spErr := m.btc.RetrieveStateProofsFromTx(blockResp.Block.Transactions...)
+			if err != nil {
+				m.logger.Debug("failed to retrieve state proofs", "error", spErr)
+				errors.Join(err, spErr)
+				continue
+			}
+
+			m.logger.Debug("retrieved potential blocks", "n", len(stateProofs.Blocks), "btcHeight", btcHeight)
+
+			for _, block := range stateProofs.Blocks {
+				blockHash := string(block.BlockProofs)
+				if m.btcBlockCache.isSeen(blockHash) {
+					continue
+				}
+
+				select {
+				case <-ctx.Done():
+					return pkgErrors.WithMessage(ctx.Err(), "unable to send block to btcBlockInCh, context done")
+				default:
+				}
+				m.btcBlockInCh <- NewBtcBlockEvent{block, btcHeight}
+			}
+
+			return nil
+		}
+
+		// Track the error
+		err = errors.Join(err, fetchErr)
+		// Delay before retrying
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(1 * time.Minute):
+		}
+	}
+	return err
 }
 
 // fetch only next DA block
@@ -732,6 +839,11 @@ func (m *Manager) isUsingExpectedCentralizedSequencer(block *types.Block) bool {
 	return bytes.Equal(block.SignedHeader.ProposerAddress, m.genesis.Validators[0].Address.Bytes()) && block.ValidateBasic() == nil
 }
 
+// todo: need to check that the packet received is from a centralized sequencer
+func (m *Manager) isUsingExpectedBtcCentralizedSequencer() bool {
+	return true
+}
+
 func (m *Manager) fetchBlock(ctx context.Context, daHeight uint64) (da.ResultRetrieveBlocks, error) {
 	var err error
 	blockRes := m.dalc.RetrieveBlocks(ctx, daHeight)
@@ -741,9 +853,9 @@ func (m *Manager) fetchBlock(ctx context.Context, daHeight uint64) (da.ResultRet
 	return blockRes, err
 }
 
-func (m *Manager) fetchBtcBlock(ctx context.Context, btcHeight int64) (bitcoin.ResultRetrieveBlocks, error) {
+func (m *Manager) fetchBtcBlock(ctx context.Context, btcHeight uint64) (bitcoin.ResultRetrieveBlocks, error) {
 	var err error
-	blockRes := m.btc.RetrieveBlocks(ctx, btcHeight)
+	blockRes := m.btc.RetrieveBlocks(ctx, int64(btcHeight))
 	if blockRes.Code == bitcoin.StatusError {
 		err = fmt.Errorf("failed to retrieve block: %s", blockRes.Message)
 	}

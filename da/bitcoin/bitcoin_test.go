@@ -21,8 +21,8 @@ const (
 	regTestBlockTime   = 3 * time.Second
 )
 
-// go test -v -run ^TestRetrieveBlocks$ github.com/rollkit/rollkit/da/bitcoin
-func TestRetrieveBlocks(t *testing.T) {
+// go test -v -run ^TestRetrieveStateProofsFromBlocks$ github.com/rollkit/rollkit/da/bitcoin
+func TestRetrieveStateProofsFromBlocks(t *testing.T) {
 	t.Run("TestRetrieveBlocks", func(t *testing.T) {
 		nodeConfig := config.NodeConfig{
 			// regtest network
@@ -46,6 +46,7 @@ func TestRetrieveBlocks(t *testing.T) {
 				{
 					BlockProofs:   []byte("blockproofs"),
 					TxOrderProofs: []byte("txorderproofs"),
+					Height:        1,
 				},
 			},
 		}
@@ -56,23 +57,31 @@ func TestRetrieveBlocks(t *testing.T) {
 
 		// retrieve blocks starting from latest block height
 		var res bitcoin.ResultRetrieveBlocks
+		var stateProofsRes *btctypes.StateProofs
 		pointer := latestBlockHeight
 		for {
+			t.Logf("Retrieve block %d", pointer)
 			res = btcClient.RetrieveBlocks(context.Background(), pointer)
 			if res.Code == bitcoin.StatusSuccess {
-				break
+				stateProofsRes, err = btcClient.RetrieveStateProofsFromTx(res.Block.Transactions...)
+				t.Logf("error %v", err)
+				if stateProofsRes != nil {
+					break
+				}
+
+				// if fetch success, move pointer forward
+				pointer++
 			}
-			pointer++
 			time.Sleep(regTestBlockTime)
 		}
 
 		assert.Equal(t, bitcoin.StatusSuccess, res.Code)
-		assert.Equal(t, len(res.StateProofs.Blocks), 1)
+		assert.Equal(t, len(stateProofsRes.Blocks), 1)
 	})
 }
 
-// go test -v -run ^TestReadTransaction$ github.com/rollkit/rollkit/da/bitcoin
-func TestReadTransaction(t *testing.T) {
+// go test -v -run ^TestRetrieveStateProofs$ github.com/rollkit/rollkit/da/bitcoin
+func TestRetrieveStateProofs(t *testing.T) {
 	t.Run("TestSubmitStateProofs", func(t *testing.T) {
 		nodeConfig := config.NodeConfig{
 			// regtest network
@@ -97,6 +106,7 @@ func TestReadTransaction(t *testing.T) {
 				{
 					BlockProofs:   []byte("blockproofs"),
 					TxOrderProofs: []byte("txorderproofs"),
+					Height:        1,
 				},
 			},
 		}
@@ -104,13 +114,10 @@ func TestReadTransaction(t *testing.T) {
 		submitHash := SendStateProofs(btcClient, stateProofs, t)
 
 		// read submitted transaction
-		resp, err := btcClient.ReadTransaction(submitHash)
-		assert.NoError(t, err)
-		stateProofsResp := &btctypes.StateProofs{}
-		err = stateProofsResp.Unmarshal(resp)
+		resp, err := btcClient.RetrieveStateProofs(submitHash)
 		assert.NoError(t, err)
 
-		assert.Equal(t, stateProofs.Blocks[0].BlockProofs, stateProofsResp.Blocks[0].BlockProofs)
+		assert.Equal(t, stateProofs.Blocks[0].BlockProofs, resp.Blocks[0].BlockProofs)
 	})
 }
 

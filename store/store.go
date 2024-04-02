@@ -28,8 +28,9 @@ var (
 
 // DefaultStore is a default store implmementation.
 type DefaultStore struct {
-	db     ds.TxnDatastore
-	height atomic.Uint64
+	db               ds.TxnDatastore
+	height           atomic.Uint64
+	btcRollupsHeight atomic.Uint64
 }
 
 var _ Store = &DefaultStore{}

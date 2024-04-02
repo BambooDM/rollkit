@@ -15,6 +15,7 @@ How would I submit blocks to Bitcoin?
 - [bitcoin client interface](../../da/bitcoin/bitcoin.go)
 - [bitcoin node integration](../../node/bitcoin.go)
 - [bitcoin client manager](../../block/manager.go)
+- [bitcoin block store](../../block/bitcoin.go)
 
 # bitcoin client
 bitcoin client structure
@@ -26,7 +27,7 @@ type BitcoinClient struct {
 ```
 
 interacts with bitcoin layer through functions:
-* SubmitStateProofs: 
+* SubmitStateProofs
 * RetrieveStateProofs
 * MaxProofSize
 * RetrieveBlocks
@@ -65,13 +66,17 @@ type Manager struct {
 ```
 
 manager responsibilities:
-* retrieve latest blocks from bitcoin `RetrieveBtcLoop` independently from DA block fetching
-* syncing bitcoin blocks `SyncLoop()`
+1. retrieve latest blocks from bitcoin `BtcRetrieveLoop` independently from DA block fetching
+* every new block event will be pushed into btcBlockInCh channel for later processing
+
+2. syncing bitcoin blocks `SyncLoop()`
+
+
 
 mechanism understanding:
 * how block syncing happens, why it has to stay together NewBlockEvent
 * celestia uses ipfs block store to persist blocks
-* rollkit fetches block stores `BlockStoreRetrieveLoop` and then feed it into a channel for later processing, but why only one `blockInCh`?
+* rollkit fetches block stores `BlockStoreRetrieveLoop` and then feed it into a channel for later processing, but why only one `blockInCh`? 
 * a block fetched from DA consists of many block stores from IPFS at exact da height
 
 # node integration

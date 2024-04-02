@@ -32,8 +32,8 @@ type ResultSubmitStateProofs struct {
 type ResultRetrieveBlocks struct {
 	Code StatusCode
 	// Message may contain bitcoin specific information (like bitcoin block height/hash, detailed error message, etc)
-	Message     string
-	StateProofs *btctypes.StateProofs
+	Message string
+	Block   *wire.MsgBlock
 }
 
 // StatusCode is a type for DA layer return status.
@@ -47,6 +47,7 @@ const (
 	StatusError
 	StatusUnknown
 	StatusStateProofsNotFound
+	StatusNotFound
 )
 
 var (
@@ -102,10 +103,50 @@ func (bc *BitcoinClient) SubmitStateProofs(ctx context.Context, stateProofs btct
 	return res
 }
 
-// retrieve state proofs from bitcoin layer
-func (bc *BitcoinClient) RetrieveStateProofs(ctx context.Context) btctypes.StateProofs {
-	res := btctypes.StateProofs{}
-	return res
+func (bc *BitcoinClient) RetrieveStateProofs(hash *chainhash.Hash) (*btctypes.StateProofs, error) {
+	tx, err := bc.BtcClient.GetRawTransaction(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	// if witness data is present, extract the embedded data
+	stateProofs, err := bc.RetrieveStateProofsFromTx(tx.MsgTx())
+	if err != nil {
+		return nil, err
+	}
+
+	return stateProofs, nil
+}
+
+// try to get StateProofs from transaction data
+func (bc *BitcoinClient) RetrieveStateProofsFromTx(txs ...*wire.MsgTx) (*btctypes.StateProofs, error) {
+	var data []byte
+	for _, tx := range txs {
+		if len(tx.TxIn[0].Witness) > 1 {
+			witness := tx.TxIn[0].Witness[1]
+			pushData, err := extractPushData(0, witness)
+			if err != nil {
+				return nil, err
+			}
+			// skip PROTOCOL_ID
+			protocol_len := len(PROTOCOL_ID)
+			if pushData != nil && bytes.HasPrefix(pushData, PROTOCOL_ID) {
+				data = pushData[protocol_len:]
+			}
+		}
+	}
+
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	stateProofs := &btctypes.StateProofs{}
+	err := stateProofs.Unmarshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stateProofs with error: %s", err.Error())
+	}
+
+	return stateProofs, nil
 }
 
 // MaxProofSize returns the max possible proof size
@@ -118,7 +159,7 @@ func (bc *BitcoinClient) RetrieveBlocks(ctx context.Context, btcHeight int64) Re
 	block_hash, err := bc.BtcClient.GetBlockHash(btcHeight)
 	if err != nil {
 		return ResultRetrieveBlocks{
-			Code:    StatusError,
+			Code:    StatusNotFound,
 			Message: fmt.Sprintf("failed to retrieve block hash at height %d with error: %s", btcHeight, err.Error()),
 		}
 	}
@@ -126,50 +167,14 @@ func (bc *BitcoinClient) RetrieveBlocks(ctx context.Context, btcHeight int64) Re
 	block, err := bc.BtcClient.GetBlock(block_hash)
 	if err != nil {
 		return ResultRetrieveBlocks{
-			Code:    StatusError,
+			Code:    StatusNotFound,
 			Message: fmt.Sprintf("failed to retrieve block at height %d with error: %s", btcHeight, err.Error()),
 		}
 	}
 
-	var data []byte
-	for _, tx := range block.Transactions {
-		if len(tx.TxIn[0].Witness) > 1 {
-			// fetch witness first bytes
-			witness := tx.TxIn[0].Witness[1]
-			pushData, err := extractPushData(0, witness)
-			if err != nil {
-				return ResultRetrieveBlocks{
-					Code:    StatusError,
-					Message: fmt.Sprintf("failed to retrieve block at height %d with error: %s", btcHeight, err.Error()),
-				}
-			}
-			// skip PROTOCOL_ID
-			protocol_len := len(PROTOCOL_ID)
-			if pushData != nil && bytes.HasPrefix(pushData, PROTOCOL_ID) {
-				data = pushData[protocol_len:]
-			}
-		}
-	}
-
-	if len(data) == 0 {
-		return ResultRetrieveBlocks{
-			Code:    StatusStateProofsNotFound,
-			Message: fmt.Sprintf("failed to retrieve state proofs at height %d", btcHeight),
-		}
-	}
-
-	stateProofs := &btctypes.StateProofs{}
-	err = stateProofs.Unmarshal(data)
-	if err != nil {
-		return ResultRetrieveBlocks{
-			Code:    StatusError,
-			Message: fmt.Sprintf("failed to unmarshal stateProofs with error: %s", err.Error()),
-		}
-	}
-
 	return ResultRetrieveBlocks{
-		Code:        StatusSuccess,
-		StateProofs: stateProofs,
+		Code:  StatusSuccess,
+		Block: block,
 	}
 }
 
@@ -297,29 +302,6 @@ func (bc *BitcoinClient) spendOutputs(embeddedData []byte, commitHash *chainhash
 		return nil, fmt.Errorf("error sending reveal transaction: %v", err)
 	}
 	return hash, nil
-}
-
-func (bc *BitcoinClient) ReadTransaction(hash *chainhash.Hash) ([]byte, error) {
-	tx, err := bc.BtcClient.GetRawTransaction(hash)
-	if err != nil {
-		return nil, err
-	}
-
-	// if witness data is present, extract the embedded data
-	if len(tx.MsgTx().TxIn[0].Witness) > 1 {
-		witness := tx.MsgTx().TxIn[0].Witness[1]
-		// get mozita packet from witness field if exists
-		pushData, err := extractPushData(0, witness)
-		if err != nil {
-			return nil, err
-		}
-		// skip PROTOCOL_ID
-		protocol_len := len(PROTOCOL_ID)
-		if pushData != nil && bytes.HasPrefix(pushData, PROTOCOL_ID) {
-			return pushData[protocol_len:], nil
-		}
-	}
-	return nil, nil
 }
 
 // Construct the Taproot script with one leaf, Taproot can have many leafs
