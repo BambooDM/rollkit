@@ -270,6 +270,7 @@ func NewManager(
 		blockStore:    blockStore,
 		lastStateMtx:  new(sync.RWMutex),
 		blockCache:    NewBlockCache(),
+		btcBlockCache: NewBtcBlockCache(),
 		retrieveCh:    make(chan struct{}, 1),
 		retrieveBtcCh: make(chan struct{}, 1),
 		logger:        logger,

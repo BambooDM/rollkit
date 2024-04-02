@@ -13,8 +13,8 @@ type BtcBlockCache struct {
 }
 
 // NewBtcBlockCache returns a new BlockCache struct
-func NewBtcBlockCache() *BlockCache {
-	return &BlockCache{
+func NewBtcBlockCache() *BtcBlockCache {
+	return &BtcBlockCache{
 		blocks: new(sync.Map),
 		hashes: new(sync.Map),
 	}
