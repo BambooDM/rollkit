@@ -134,7 +134,7 @@ func SendStateProofs(btcClient *bitcoin.BitcoinClient, stateProofs btctypes.Stat
 		internalPrivateKey,
 		chaincfg,
 	)
-	assert.Equal(t, bitcoin.StatusSuccess, res.Code)
+	assert.Equal(t, bitcoin.StatusSuccess, res.Code, res.Message)
 
 	return res.SubmitHash
 }

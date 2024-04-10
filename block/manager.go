@@ -192,6 +192,10 @@ func NewManager(
 		s.DAHeight = conf.DAStartHeight
 	}
 
+	if s.BtcHeight < conf.BtcStartHeight {
+		s.BtcHeight = conf.BtcStartHeight
+	}
+
 	if conf.DABlockTime == 0 {
 		logger.Info("Using default DA block time", "DABlockTime", defaultDABlockTime)
 		conf.DABlockTime = defaultDABlockTime
@@ -260,6 +264,7 @@ func NewManager(
 		executor:    exec,
 		dalc:        dalc,
 		daHeight:    s.DAHeight,
+		btcHeight:   s.BtcHeight,
 		btc:         btc,
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
 		HeaderCh:      make(chan *types.SignedHeader, channelLength),
@@ -687,6 +692,7 @@ func (m *Manager) BtcRetrieveLoop(ctx context.Context) {
 		}
 
 		btcHeight := atomic.LoadUint64(&m.btcHeight)
+		fmt.Printf("btc height = %d\n", btcHeight)
 		err := m.processNextBitcoinBlock(ctx)
 		if err != nil && ctx.Err() == nil {
 			m.logger.Error("failed to retrieve block from bitcoin", "height", btcHeight, "errors", err.Error())
@@ -723,8 +729,9 @@ func (m *Manager) processNextBitcoinBlock(ctx context.Context) error {
 		}
 		blockResp, fetchErr := m.fetchBtcBlock(ctx, btcHeight)
 		if blockResp.Code == bitcoin.StatusNotFound {
-			m.logger.Debug("no block found", "btcHeight", btcHeight, "reason", blockResp.Message)
-			return nil
+			err := fmt.Errorf("no block found at btcHeight = %d, reason = %s", btcHeight, blockResp.Message)
+			m.logger.Debug(err.Error())
+			return err
 		}
 
 		if fetchErr == nil {
@@ -734,7 +741,7 @@ func (m *Manager) processNextBitcoinBlock(ctx context.Context) error {
 			}
 
 			stateProofs, spErr := m.btc.RetrieveStateProofsFromTx(blockResp.Block.Transactions...)
-			if err != nil {
+			if spErr != nil {
 				m.logger.Debug("failed to retrieve state proofs", "error", spErr)
 				errors.Join(err, spErr)
 				continue

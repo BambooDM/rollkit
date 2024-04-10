@@ -75,6 +75,8 @@ func (bc *BitcoinClient) SubmitStateProofs(ctx context.Context, stateProofs btct
 	}
 	data = append(data, stateProofsBytes...)
 
+	fmt.Println("data length: ", len(data))
+
 	// prepare taproot address for P2TR
 	address, err := createTaprootAddress(data, signerPriv, internalKeyPriv)
 	if err != nil {
@@ -137,7 +139,7 @@ func (bc *BitcoinClient) RetrieveStateProofsFromTx(txs ...*wire.MsgTx) (*btctype
 	}
 
 	if len(data) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no state proofs found in transaction")
 	}
 
 	stateProofs := &btctypes.StateProofs{}

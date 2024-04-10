@@ -6,3 +6,4 @@ types/pb/tendermint
 */**.html
 *.idea
 _build/
+mytesnet/

@@ -39,7 +39,8 @@ type State struct {
 	LastBlockTime   time.Time
 
 	// DAHeight identifies DA block containing the latest applied Rollkit block.
-	DAHeight uint64
+	DAHeight  uint64
+	BtcHeight uint64
 
 	// Consensus parameters used for validating blocks.
 	// Changes returned by EndBlock and updated after Commit.
