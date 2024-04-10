@@ -14,6 +14,8 @@ const (
 	FlagAggregator = "rollkit.aggregator"
 	// FlagDAAddress is a flag for specifying the data availability layer address
 	FlagDAAddress = "rollkit.da_address"
+	// FlagDAAuthToken is a flag for specifying the data availability layer auth token
+	FlagDAAuthToken = "rollkit.da_auth_token" // #nosec G101
 	// FlagBlockTime is a flag for specifying the block time
 	FlagBlockTime = "rollkit.block_time"
 	// FlagDABlockTime is a flag for specifying the data availability layer block time
@@ -32,6 +34,8 @@ const (
 	FlagTrustedHash = "rollkit.trusted_hash"
 	// FlagLazyAggregator is a flag for enabling lazy aggregation
 	FlagLazyAggregator = "rollkit.lazy_aggregator"
+	// FlagMaxPendingBlocks is a flag to pause aggregator in case of large number of blocks pending DA submission
+	FlagMaxPendingBlocks = "rollkit.max_pending_blocks"
 )
 
 // NodeConfig stores Rollkit node configuration.
@@ -45,6 +49,7 @@ type NodeConfig struct {
 	Aggregator         bool `mapstructure:"aggregator"`
 	BlockManagerConfig `mapstructure:",squash"`
 	DAAddress          string `mapstructure:"da_address"`
+	DAAuthToken        string `mapstructure:"da_auth_token"`
 	Light              bool   `mapstructure:"light"`
 	HeaderConfig       `mapstructure:",squash"`
 	LazyAggregator     bool                         `mapstructure:"lazy_aggregator"`
@@ -73,6 +78,9 @@ type BlockManagerConfig struct {
 	DAStartHeight uint64 `mapstructure:"da_start_height"`
 	// DAMempoolTTL is the number of DA blocks until transaction is dropped from the mempool.
 	DAMempoolTTL uint64 `mapstructure:"da_mempool_ttl"`
+	// MaxPendingBlocks defines limit of blocks pending DA submission. 0 means no limit.
+	// When limit is reached, aggregator pauses block production.
+	MaxPendingBlocks uint64 `mapstructure:"max_pending_blocks"`
 	// BtcBlockTime defines how often new Bitcoin blocks are produced
 	BtcBlockTime time.Duration `mapstructure:"btc_block_time"`
 	// BtcStartHeight allows skipping first BtcStartHeight-1 blocks when querying for Bitcoin blocks.
@@ -126,6 +134,7 @@ func GetNodeConfig(nodeConf *NodeConfig, cmConf *cmcfg.Config) {
 func (nc *NodeConfig) GetViperConfig(v *viper.Viper) error {
 	nc.Aggregator = v.GetBool(FlagAggregator)
 	nc.DAAddress = v.GetString(FlagDAAddress)
+	nc.DAAuthToken = v.GetString(FlagDAAuthToken)
 	nc.DAGasPrice = v.GetFloat64(FlagDAGasPrice)
 	nc.DAGasMultiplier = v.GetFloat64(FlagDAGasMultiplier)
 	nc.DANamespace = v.GetString(FlagDANamespace)
@@ -136,6 +145,7 @@ func (nc *NodeConfig) GetViperConfig(v *viper.Viper) error {
 	nc.Light = v.GetBool(FlagLight)
 	nc.TrustedHash = v.GetString(FlagTrustedHash)
 	nc.TrustedHash = v.GetString(FlagTrustedHash)
+	nc.MaxPendingBlocks = v.GetUint64(FlagMaxPendingBlocks)
 	return nil
 }
 
@@ -147,6 +157,7 @@ func AddFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool(FlagAggregator, def.Aggregator, "run node in aggregator mode")
 	cmd.Flags().Bool(FlagLazyAggregator, def.LazyAggregator, "wait for transactions, don't build empty blocks")
 	cmd.Flags().String(FlagDAAddress, def.DAAddress, "DA address (host:port)")
+	cmd.Flags().String(FlagDAAuthToken, def.DAAuthToken, "DA auth token")
 	cmd.Flags().Duration(FlagBlockTime, def.BlockTime, "block time (for aggregator mode)")
 	cmd.Flags().Duration(FlagDABlockTime, def.DABlockTime, "DA chain block time (for syncing)")
 	cmd.Flags().Float64(FlagDAGasPrice, def.DAGasPrice, "DA gas price for blob transactions")
@@ -155,4 +166,5 @@ func AddFlags(cmd *cobra.Command) {
 	cmd.Flags().String(FlagDANamespace, def.DANamespace, "DA namespace to submit blob transactions")
 	cmd.Flags().Bool(FlagLight, def.Light, "run light client")
 	cmd.Flags().String(FlagTrustedHash, def.TrustedHash, "initial trusted hash to start the header exchange service")
+	cmd.Flags().Uint64(FlagMaxPendingBlocks, def.MaxPendingBlocks, "limit of blocks pending DA submission (0 for no limit)")
 }

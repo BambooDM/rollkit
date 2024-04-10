@@ -22,14 +22,15 @@ import (
 	"github.com/rollkit/rollkit/da/mock"
 	"github.com/rollkit/rollkit/store"
 	test "github.com/rollkit/rollkit/test/log"
+	"github.com/rollkit/rollkit/test/mocks"
 	"github.com/rollkit/rollkit/types"
 )
 
 // Returns a minimalistic block manager
 func getManager(t *testing.T, backend goDA.DA) *Manager {
-	logger := test.NewFileLoggerCustom(t, test.TempLogFileName(t, t.Name()))
+	logger := test.NewLogger(t)
 	return &Manager{
-		dalc:       &da.DAClient{DA: backend, GasPrice: -1, GasMultiplier: -1, Logger: logger},
+		dalc:       da.NewDAClient(backend, -1, -1, nil, logger),
 		blockCache: NewBlockCache(),
 		logger:     logger,
 	}
@@ -137,49 +138,73 @@ func TestIsDAIncluded(t *testing.T) {
 func TestSubmitBlocksToMockDA(t *testing.T) {
 	ctx := context.Background()
 
-	mockDA := &mock.MockDA{}
-	m := getManager(t, mockDA)
-	m.conf.DABlockTime = time.Millisecond
-	m.conf.DAMempoolTTL = 1
-	m.dalc.GasPrice = 1.0
-	m.dalc.GasMultiplier = 1.2
-	kvStore, err := store.NewDefaultInMemoryKVStore()
-	require.NoError(t, err)
-	m.store = store.New(kvStore)
+	testCases := []struct {
+		name              string
+		gasPrice          float64
+		gasMultiplier     float64
+		expectedGasPrices []float64
+		isErrExpected     bool
+	}{
+		{"defaults", -1, -1, []float64{
+			-1, -1, -1,
+		}, false},
+		{"fixed_gas_price", 1.0, -1, []float64{
+			1.0, 1.0, 1.0,
+		}, false},
+		{"default_gas_price_with_multiplier", -1, 1.2, []float64{
+			-1, -1, -1,
+		}, false},
+		{"fixed_gas_price_with_multiplier", 1.0, 1.2, []float64{
+			1.0, 1.2, 1.2 * 1.2,
+		}, false},
+	}
 
-	t.Run("handle_tx_already_in_mempool", func(t *testing.T) {
-		var blobs [][]byte
-		block := types.GetRandomBlock(1, 5)
-		blob, err := block.MarshalBinary()
-		require.NoError(t, err)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockDA := &mock.MockDA{}
+			m := getManager(t, mockDA)
+			m.conf.DABlockTime = time.Millisecond
+			m.conf.DAMempoolTTL = 1
+			kvStore, err := store.NewDefaultInMemoryKVStore()
+			require.NoError(t, err)
+			m.store = store.New(kvStore)
 
-		err = m.store.SaveBlock(ctx, block, &types.Commit{})
-		require.NoError(t, err)
-		m.store.SetHeight(ctx, 1)
+			var blobs [][]byte
+			block := types.GetRandomBlock(1, 5)
+			blob, err := block.MarshalBinary()
+			require.NoError(t, err)
 
-		blobs = append(blobs, blob)
-		// Set up the mock to
-		// * throw timeout waiting for tx to be included exactly once
-		// * wait for tx to drop from mempool exactly DABlockTime * DAMempoolTTL seconds
-		// * retry with a higher gas price
-		// * successfully submit
-		mockDA.On("MaxBlobSize").Return(uint64(12345), nil)
-		mockDA.
-			On("Submit", blobs, 1.0, []byte(nil)).
-			Return([][]byte{}, da.ErrTxTimedout).Once()
-		mockDA.
-			On("Submit", blobs, 1.0*1.2, []byte(nil)).
-			Return([][]byte{}, da.ErrTxAlreadyInMempool).Times(int(m.conf.DAMempoolTTL))
-		mockDA.
-			On("Submit", blobs, 1.0*1.2*1.2, []byte(nil)).
-			Return([][]byte{bytes.Repeat([]byte{0x00}, 8)}, nil)
+			err = m.store.SaveBlock(ctx, block, &types.Commit{})
+			require.NoError(t, err)
+			m.store.SetHeight(ctx, 1)
 
-		m.pendingBlocks, err = NewPendingBlocks(m.store, m.logger)
-		require.NoError(t, err)
-		err = m.submitBlocksToDA(ctx)
-		require.NoError(t, err)
-		mockDA.AssertExpectations(t)
-	})
+			m.dalc.GasPrice = tc.gasPrice
+			m.dalc.GasMultiplier = tc.gasMultiplier
+
+			blobs = append(blobs, blob)
+			// Set up the mock to
+			// * throw timeout waiting for tx to be included exactly twice
+			// * wait for tx to drop from mempool exactly DABlockTime * DAMempoolTTL seconds
+			// * retry with a higher gas price
+			// * successfully submit
+			mockDA.On("MaxBlobSize").Return(uint64(12345), nil)
+			mockDA.
+				On("Submit", blobs, tc.expectedGasPrices[0], []byte(nil)).
+				Return([][]byte{}, da.ErrTxTimedout).Once()
+			mockDA.
+				On("Submit", blobs, tc.expectedGasPrices[1], []byte(nil)).
+				Return([][]byte{}, da.ErrTxTimedout).Once()
+			mockDA.
+				On("Submit", blobs, tc.expectedGasPrices[2], []byte(nil)).
+				Return([][]byte{bytes.Repeat([]byte{0x00}, 8)}, nil)
+
+			m.pendingBlocks, err = NewPendingBlocks(m.store, m.logger)
+			require.NoError(t, err)
+			err = m.submitBlocksToDA(ctx)
+			require.NoError(t, err)
+			mockDA.AssertExpectations(t)
+		})
+	}
 }
 
 func TestSubmitBlocksToDA(t *testing.T) {
@@ -240,6 +265,20 @@ func TestSubmitBlocksToDA(t *testing.T) {
 			isErrExpected:               true,
 			expectedPendingBlocksLength: 1,
 		},
+		{
+			name: "B is too big on its own. So A gets submitted but, B and C never get submitted",
+			blocks: func() []*types.Block {
+				numBlocks, numTxs := 3, 5
+				blocks := make([]*types.Block, numBlocks)
+				blocks[0] = types.GetRandomBlock(uint64(1), numTxs)
+				blocks[1], err = getBlockBiggerThan(2, maxDABlobSizeLimit)
+				require.NoError(err)
+				blocks[2] = types.GetRandomBlock(uint64(3), numTxs)
+				return blocks
+			}(),
+			isErrExpected:               true,
+			expectedPendingBlocksLength: 2,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -280,6 +319,85 @@ func getTempKVStore(t *testing.T) ds.TxnDatastore {
 	kvStore, err := store.NewDefaultKVStore(os.TempDir(), dbPath, t.Name())
 	require.NoError(t, err)
 	return kvStore
+}
+
+// Test_submitBlocksToDA_BlockMarshalErrorCase1: A itself has a marshalling error. So A, B and C never get submitted.
+func Test_submitBlocksToDA_BlockMarshalErrorCase1(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+	ctx := context.Background()
+
+	m := getManager(t, goDATest.NewDummyDA())
+
+	block1 := types.GetRandomBlock(uint64(1), 5)
+	block2 := types.GetRandomBlock(uint64(2), 5)
+	block3 := types.GetRandomBlock(uint64(3), 5)
+
+	store := mocks.NewStore(t)
+	invalidateBlockHeader(block1)
+	store.On("GetMetadata", ctx, LastSubmittedHeightKey).Return(nil, ds.ErrNotFound)
+	store.On("GetBlock", ctx, uint64(1)).Return(block1, nil)
+	store.On("GetBlock", ctx, uint64(2)).Return(block2, nil)
+	store.On("GetBlock", ctx, uint64(3)).Return(block3, nil)
+	store.On("Height").Return(uint64(3))
+
+	m.store = store
+
+	var err error
+	m.pendingBlocks, err = NewPendingBlocks(store, m.logger)
+	require.NoError(err)
+
+	err = m.submitBlocksToDA(ctx)
+	assert.ErrorContains(err, "failed to submit all blocks to DA layer")
+	blocks, err := m.pendingBlocks.getPendingBlocks(ctx)
+	assert.NoError(err)
+	assert.Equal(3, len(blocks))
+}
+
+// Test_submitBlocksToDA_BlockMarshalErrorCase2: A and B are fair blocks, but C has a marshalling error
+// - Block A and B get submitted to DA layer not block C
+func Test_submitBlocksToDA_BlockMarshalErrorCase2(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+	ctx := context.Background()
+
+	m := getManager(t, goDATest.NewDummyDA())
+
+	block1 := types.GetRandomBlock(uint64(1), 5)
+	block2 := types.GetRandomBlock(uint64(2), 5)
+	block3 := types.GetRandomBlock(uint64(3), 5)
+
+	store := mocks.NewStore(t)
+	invalidateBlockHeader(block3)
+	store.On("SetMetadata", ctx, LastSubmittedHeightKey, []byte(strconv.FormatUint(2, 10))).Return(nil)
+	store.On("GetMetadata", ctx, LastSubmittedHeightKey).Return(nil, ds.ErrNotFound)
+	store.On("GetBlock", ctx, uint64(1)).Return(block1, nil)
+	store.On("GetBlock", ctx, uint64(2)).Return(block2, nil)
+	store.On("GetBlock", ctx, uint64(3)).Return(block3, nil)
+	store.On("Height").Return(uint64(3))
+
+	m.store = store
+
+	var err error
+	m.pendingBlocks, err = NewPendingBlocks(store, m.logger)
+	require.NoError(err)
+	err = m.submitBlocksToDA(ctx)
+	assert.ErrorContains(err, "failed to submit all blocks to DA layer")
+	blocks, err := m.pendingBlocks.getPendingBlocks(ctx)
+	assert.NoError(err)
+	assert.Equal(1, len(blocks))
+}
+
+// invalidateBlockHeader results in a block header that produces a marshalling error
+func invalidateBlockHeader(block *types.Block) {
+	for i := range block.SignedHeader.Validators.Validators {
+		block.SignedHeader.Validators.Validators[i] = &cmtypes.Validator{
+			Address:          []byte(""),
+			PubKey:           nil,
+			VotingPower:      -1,
+			ProposerPriority: 0,
+		}
+	}
 }
 
 func Test_isProposer(t *testing.T) {

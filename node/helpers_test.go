@@ -15,13 +15,14 @@ import (
 
 	goDATest "github.com/rollkit/go-da/test"
 	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/types"
 )
 
 func getMockDA(t *testing.T) *da.DAClient {
-	namespace := make([]byte, len(MockNamespace)/2)
-	_, err := hex.Decode(namespace, []byte(MockNamespace))
+	namespace := make([]byte, len(MockDANamespace)/2)
+	_, err := hex.Decode(namespace, []byte(MockDANamespace))
 	require.NoError(t, err)
-	return &da.DAClient{DA: goDATest.NewDummyDA(), Namespace: namespace, GasPrice: -1, GasMultiplier: -1, Logger: log.TestingLogger()}
+	return da.NewDAClient(goDATest.NewDummyDA(), -1, -1, namespace, log.TestingLogger())
 }
 
 func TestMockTester(t *testing.T) {
@@ -44,7 +45,7 @@ func TestGetNodeHeight(t *testing.T) {
 	}
 	bmConfig := getBMConfig()
 	fullNode, _ := createAndConfigureNode(ctx, 0, true, false, keys, bmConfig, dalc, t)
-	lightNode, _ := createNode(ctx, 1, true, true, keys, bmConfig, t)
+	lightNode, _ := createNode(ctx, 1, true, true, keys, bmConfig, types.TestChainID, t)
 
 	startNodeWithCleanup(t, fullNode)
 	startNodeWithCleanup(t, lightNode)

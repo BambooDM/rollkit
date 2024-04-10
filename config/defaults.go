@@ -26,9 +26,9 @@ var DefaultNodeConfig = NodeConfig{
 		BlockTime:   1 * time.Second,
 		DABlockTime: 15 * time.Second,
 	},
-	DAAddress:       ":26650",
+	DAAddress:       "http://localhost:26658",
 	DAGasPrice:      -1,
-	DAGasMultiplier: -1,
+	DAGasMultiplier: 0,
 	Light:           false,
 	HeaderConfig: HeaderConfig{
 		TrustedHash: "",

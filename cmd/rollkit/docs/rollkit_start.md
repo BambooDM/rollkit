@@ -10,6 +10,7 @@ rollkit start [flags]
 
 ```
       --abci string                                     specify abci transport (socket | grpc) (default "socket")
+      --ci                                              run node for ci testing
       --consensus.create_empty_blocks                   set this to false to only produce blocks when there are txs or when the AppHash changes (default true)
       --consensus.create_empty_blocks_interval string   the possible interval between empty blocks (default "0s")
       --consensus.double_sign_check_height int          how many blocks to look back to check existence of the node's consensus votes before joining consensus
@@ -30,14 +31,16 @@ rollkit start [flags]
       --proxy_app string                                proxy app address, or one of: 'kvstore', 'persistent_kvstore' or 'noop' for local testing. (default "tcp://127.0.0.1:26658")
       --rollkit.aggregator                              run node in aggregator mode
       --rollkit.block_time duration                     block time (for aggregator mode) (default 1s)
-      --rollkit.da_address string                       DA address (host:port) (default ":26650")
+      --rollkit.da_address string                       DA address (host:port) (default "http://localhost:26658")
+      --rollkit.da_auth_token string                    DA auth token
       --rollkit.da_block_time duration                  DA chain block time (for syncing) (default 15s)
-      --rollkit.da_gas_multiplier float                 DA gas price multiplier for retrying blob transactions (default -1)
+      --rollkit.da_gas_multiplier float                 DA gas price multiplier for retrying blob transactions
       --rollkit.da_gas_price float                      DA gas price for blob transactions (default -1)
       --rollkit.da_namespace string                     DA namespace to submit blob transactions
       --rollkit.da_start_height uint                    starting DA block height (for syncing)
       --rollkit.lazy_aggregator                         wait for transactions, don't build empty blocks
       --rollkit.light                                   run light client
+      --rollkit.max_pending_blocks uint                 limit of blocks pending DA submission (0 for no limit)
       --rollkit.trusted_hash string                     initial trusted hash to start the header exchange service
       --rpc.grpc_laddr string                           GRPC listen address (BroadcastTx only). Port required
       --rpc.laddr string                                RPC listen address. Port required (default "tcp://127.0.0.1:26657")

@@ -16,12 +16,12 @@ import (
 	pb "github.com/rollkit/rollkit/types/pb/rollkit"
 )
 
-var (
-	// submitTimeout is the timeout for block submission
-	submitTimeout = 60 * time.Second
+const (
+	// defaultSubmitTimeout is the timeout for block submission
+	defaultSubmitTimeout = 60 * time.Second
 
-	// retrieveTimeout is the timeout for block retrieval
-	retrieveTimeout = 60 * time.Second
+	// defaultRetrieveTimeout is the timeout for block retrieval
+	defaultRetrieveTimeout = 60 * time.Second
 )
 
 var (
@@ -42,6 +42,9 @@ var (
 
 	// ErrTxSizeTooBig is the error message returned by the DA when tx size is too big
 	ErrTxSizeTooBig = errors.New("tx size is too big")
+
+	//ErrTxTooLarge is the err message returned by the DA when tx size is too large
+	ErrTxTooLarge = errors.New("tx too large")
 
 	// ErrContextDeadline is the error message returned by the DA when context deadline exceeds
 	ErrContextDeadline = errors.New("context deadline")
@@ -95,45 +98,60 @@ type ResultRetrieveBlocks struct {
 
 // DAClient is a new DA implementation.
 type DAClient struct {
-	DA            goDA.DA
-	GasPrice      float64
-	GasMultiplier float64
-	Namespace     goDA.Namespace
-	Logger        log.Logger
+	DA              goDA.DA
+	GasPrice        float64
+	GasMultiplier   float64
+	Namespace       goDA.Namespace
+	SubmitTimeout   time.Duration
+	RetrieveTimeout time.Duration
+	Logger          log.Logger
+}
+
+// NewDAClient returns a new DA client.
+func NewDAClient(da goDA.DA, gasPrice, gasMultiplier float64, ns goDA.Namespace, logger log.Logger) *DAClient {
+	return &DAClient{
+		DA:              da,
+		GasPrice:        gasPrice,
+		GasMultiplier:   gasMultiplier,
+		Namespace:       ns,
+		SubmitTimeout:   defaultSubmitTimeout,
+		RetrieveTimeout: defaultRetrieveTimeout,
+		Logger:          logger,
+	}
 }
 
 // SubmitBlocks submits blocks to DA.
 func (dac *DAClient) SubmitBlocks(ctx context.Context, blocks []*types.Block, maxBlobSize uint64, gasPrice float64) ResultSubmitBlocks {
-	var blobs [][]byte
-	var blobSize uint64
-	var submitted uint64
+	var (
+		blobs    [][]byte
+		blobSize uint64
+		message  string
+	)
 	for i := range blocks {
 		blob, err := blocks[i].MarshalBinary()
 		if err != nil {
-			return ResultSubmitBlocks{
-				BaseResult: BaseResult{
-					Code:    StatusError,
-					Message: "failed to serialize block",
-				},
-			}
+			message = fmt.Sprint("failed to serialize block", err)
+			dac.Logger.Info(message)
+			break
 		}
 		if blobSize+uint64(len(blob)) > maxBlobSize {
-			dac.Logger.Info("blob size limit reached", "maxBlobSize", maxBlobSize, "index", i, "blobSize", blobSize, "len(blob)", len(blob))
+			message = fmt.Sprint(ErrBlobSizeOverLimit.Error(), "blob size limit reached", "maxBlobSize", maxBlobSize, "index", i, "blobSize", blobSize, "len(blob)", len(blob))
+			dac.Logger.Info(message)
 			break
 		}
 		blobSize += uint64(len(blob))
-		submitted += 1
 		blobs = append(blobs, blob)
 	}
-	if submitted == 0 {
+	if len(blobs) == 0 {
 		return ResultSubmitBlocks{
 			BaseResult: BaseResult{
 				Code:    StatusError,
-				Message: "failed to submit blocks: oversized block: " + ErrBlobSizeOverLimit.Error(),
+				Message: "failed to submit blocks: no blobs generated " + message,
 			},
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, submitTimeout)
+
+	ctx, cancel := context.WithTimeout(ctx, dac.SubmitTimeout)
 	defer cancel()
 	ids, err := dac.DA.Submit(ctx, blobs, gasPrice, dac.Namespace)
 	if err != nil {
@@ -145,7 +163,8 @@ func (dac *DAClient) SubmitBlocks(ctx context.Context, blocks []*types.Block, ma
 			status = StatusAlreadyInMempool
 		case strings.Contains(err.Error(), ErrTxIncorrectAccountSequence.Error()):
 			status = StatusAlreadyInMempool
-		case strings.Contains(err.Error(), ErrTxSizeTooBig.Error()):
+		case strings.Contains(err.Error(), ErrTxSizeTooBig.Error()),
+			strings.Contains(err.Error(), ErrTxTooLarge.Error()):
 			status = StatusTooBig
 		case strings.Contains(err.Error(), ErrContextDeadline.Error()):
 			status = StatusContextDeadline
@@ -171,7 +190,7 @@ func (dac *DAClient) SubmitBlocks(ctx context.Context, blocks []*types.Block, ma
 		BaseResult: BaseResult{
 			Code:           StatusSuccess,
 			DAHeight:       binary.LittleEndian.Uint64(ids[0]),
-			SubmittedCount: submitted,
+			SubmittedCount: uint64(len(ids)),
 		},
 	}
 }
@@ -200,7 +219,7 @@ func (dac *DAClient) RetrieveBlocks(ctx context.Context, dataLayerHeight uint64)
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, retrieveTimeout)
+	ctx, cancel := context.WithTimeout(ctx, dac.RetrieveTimeout)
 	defer cancel()
 	blobs, err := dac.DA.Get(ctx, ids, dac.Namespace)
 	if err != nil {
