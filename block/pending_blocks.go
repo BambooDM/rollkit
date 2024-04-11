@@ -7,11 +7,14 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"crypto/sha256"
+
 	ds "github.com/ipfs/go-datastore"
 
 	"github.com/rollkit/rollkit/store"
 	"github.com/rollkit/rollkit/third_party/log"
 	"github.com/rollkit/rollkit/types"
+	btctypes "github.com/rollkit/rollkit/types/pb/bitcoin"
 )
 
 // LastSubmittedHeightKey is the key used for persisting the last submitted height in store.
@@ -29,12 +32,14 @@ const LastSubmittedHeightKey = "last submitted"
 // restarted, networking issue occurred). In this case blocks are re-submitted to DA (it's extra cost).
 // rollkit is able to skip duplicate blocks so this shouldn't affect full nodes.
 // TODO(tzdybal): we shouldn't try to push all pending blocks at once; this should depend on max blob size
+// Bitcoin block store can re - use current code to track, organize and submit proofs to bitcoin layer
 type PendingBlocks struct {
 	store  store.Store
 	logger log.Logger
 
 	// lastSubmittedHeight holds information about last block successfully submitted to DA
-	lastSubmittedHeight atomic.Uint64
+	lastSubmittedHeight    atomic.Uint64
+	lastBtcSubmittedHeight atomic.Uint64
 }
 
 // NewPendingBlocks returns a new PendingBlocks struct
@@ -75,8 +80,55 @@ func (pb *PendingBlocks) getPendingBlocks(ctx context.Context) ([]*types.Block, 
 	return blocks, nil
 }
 
+func (pb *PendingBlocks) getPendingBtcRollupsProofs(ctx context.Context) ([]*btctypes.RollUpsBlock, error) {
+	lastSubmitted := pb.lastBtcSubmittedHeight.Load()
+	height := pb.store.BtcRollupsHeight()
+
+	if lastSubmitted == height {
+		return nil, nil
+	}
+	if lastSubmitted > height {
+		panic(fmt.Sprintf("height of last block submitted to bitcoin (%d) is greater than height of last block (%d)",
+			lastSubmitted, height))
+	}
+
+	blocks := make([]*btctypes.RollUpsBlock, 0, height-lastSubmitted)
+	for i := lastSubmitted + 1; i <= height; i++ {
+		block, err := pb.store.GetBlock(ctx, i)
+		if err != nil {
+			// return as much as possible + error information
+			return blocks, err
+		}
+
+		// construct proofs for btc
+		signedHeader, err := block.SignedHeader.MarshalBinary()
+		if err != nil {
+			return blocks, err
+		}
+
+		// sha256 of all txs to ensure ordering
+		var txOrderProofs [32]byte
+		var combinedTxs []byte
+		for _, txBytes := range block.Data.Txs.ToSliceOfBytes() {
+			combinedTxs = append(combinedTxs, txBytes...)
+		}
+		txOrderProofs = sha256.Sum256(combinedTxs)
+
+		proof := &btctypes.RollUpsBlock{
+			BlockProofs:   signedHeader,
+			TxOrderProofs: txOrderProofs[:],
+		}
+		blocks = append(blocks, proof)
+	}
+	return blocks, nil
+}
+
 func (pb *PendingBlocks) isEmpty() bool {
 	return pb.store.Height() == pb.lastSubmittedHeight.Load()
+}
+
+func (pb *PendingBlocks) isEmptyBtcRollupsProofs() bool {
+	return pb.store.BtcRollupsHeight() == pb.lastBtcSubmittedHeight.Load()
 }
 
 func (pb *PendingBlocks) numPendingBlocks() uint64 {

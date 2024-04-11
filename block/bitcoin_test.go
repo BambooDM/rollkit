@@ -129,6 +129,11 @@ func TestSyncBitcoinBlocks(t *testing.T) {
 	}
 }
 
+// go test -v -run ^TestBtcBlockSubmissionLoop$ github.com/rollkit/rollkit/block
+func TestBtcBlockSubmissionLoop(t *testing.T) {
+
+}
+
 func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)

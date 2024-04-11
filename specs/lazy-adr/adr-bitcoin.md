@@ -74,6 +74,11 @@ manager responsibilities:
 * proofs from bitcoin are used for verification, it needs to work along side block syncing. Block syncing process will fetch stored roll ups block to compare results
 * btc roll ups block start from 1
 
+3. submit proofs to bitcoin layer:
+* track pending proofs to be submitted to bitcoin
+* all bitcon proofs will be submitted as **best - effort** for now, thus no use of limiting proofs batch through MaxBlobSize
+* manager will periodically publish blocks to bitcoin
+
 mechanism understanding:
 * how block syncing happens, why it has to stay together NewBlockEvent
 * celestia uses ipfs block store to persist blocks

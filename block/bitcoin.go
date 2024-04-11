@@ -8,8 +8,9 @@ import (
 
 // BlockCache maintains blocks that are seen and hard confirmed
 type BtcBlockCache struct {
-	blocks *sync.Map
-	hashes *sync.Map
+	blocks      *sync.Map
+	hashes      *sync.Map
+	btcIncluded *sync.Map
 }
 
 // NewBtcBlockCache returns a new BlockCache struct
@@ -48,4 +49,16 @@ func (bc *BtcBlockCache) isSeen(hash string) bool {
 
 func (bc *BtcBlockCache) setSeen(hash string) {
 	bc.hashes.Store(hash, true)
+}
+
+func (bc *BtcBlockCache) isBtcIncluded(hash string) bool {
+	btcIncluded, ok := bc.btcIncluded.Load(hash)
+	if !ok {
+		return false
+	}
+	return btcIncluded.(bool)
+}
+
+func (bc *BtcBlockCache) setBtcIncluded(hash string) {
+	bc.btcIncluded.Store(hash, true)
 }

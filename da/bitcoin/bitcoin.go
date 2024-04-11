@@ -59,7 +59,7 @@ var (
 // submit state proofs to bitcoin layer
 // protocol id length 6
 // stateProof per block length 64
-// txOrdersProofs per block length 64
+// txOrdersProofs per block length 32
 // need to define the total of blocks to be committed: 0 - 9999 blocks (length 4)
 func (bc *BitcoinClient) SubmitStateProofs(ctx context.Context, stateProofs btctypes.StateProofs, signerPriv string, internalKeyPriv string, networkParams *chaincfg.Params) ResultSubmitStateProofs {
 	res := ResultSubmitStateProofs{}

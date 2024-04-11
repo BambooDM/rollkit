@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	goheaderstore "github.com/celestiaorg/go-header/store"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmcrypto "github.com/cometbft/cometbft/crypto"
@@ -80,6 +81,11 @@ type NewBtcBlockEvent struct {
 
 // Manager is responsible for aggregating transactions into blocks.
 type Manager struct {
+	// bitcoin config
+	signerPriv       string
+	internalKeyPriv  string
+	btcNetworkParams *chaincfg.Params
+
 	lastState types.State
 	// lastStateMtx is used by lastState
 	lastStateMtx *sync.RWMutex
@@ -438,6 +444,25 @@ func (m *Manager) BlockSubmissionLoop(ctx context.Context) {
 		err := m.submitBlocksToDA(ctx)
 		if err != nil {
 			m.logger.Error("error while submitting block to DA", "error", err)
+		}
+	}
+}
+
+func (m *Manager) BtcBlockSubmissionLoop(ctx context.Context) {
+	timer := time.NewTicker(m.conf.BtcBlockTime)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		if m.pendingBlocks.isEmptyBtcRollupsProofs() {
+			continue
+		}
+		err := m.submitProofsToBitcoin(ctx)
+		if err != nil {
+			m.logger.Error("error while submitting block to Bitcoin", "error", err)
 		}
 	}
 }
@@ -1172,6 +1197,80 @@ daSubmitRetryLoop:
 	return nil
 }
 
+// will always try best - effort to submit all proofs to bitcoin
+func (m *Manager) submitProofsToBitcoin(ctx context.Context) error {
+	submittedAllBlocks := false
+	var backoff time.Duration
+	var resErr error
+	resErr = nil
+	blocksToSubmit, err := m.pendingBlocks.getPendingBtcRollupsProofs(ctx)
+	if len(blocksToSubmit) == 0 {
+		// There are no pending blocks; return because there's nothing to do, but:
+		// - it might be caused by error, then err != nil
+		// - all pending blocks are processed, then err == nil
+		// whatever the reason, error information is propagated correctly to the caller
+		return err
+	}
+	if err != nil {
+		// There are some pending blocks but also an error. It's very unlikely case - probably some error while reading
+		// blocks from the store.
+		// The error is logged and normal processing of pending blocks continues.
+		m.logger.Error("error while fetching blocks pending Bitcoin", "err", err)
+	}
+	attempt := 0
+
+	// handling after block processing
+	defer func() {
+		if !submittedAllBlocks {
+			resErr = fmt.Errorf(
+				"failed to submit all blocks to Bitcoin layer, blocks: %+v after %d attempts",
+				blocksToSubmit,
+				attempt,
+			)
+		}
+	}()
+
+	for !submittedAllBlocks && attempt < maxSubmitAttempts {
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(backoff):
+		}
+
+		stateProofs := btctypes.StateProofs{
+			Blocks: blocksToSubmit,
+		}
+		res := m.btc.SubmitStateProofs(ctx, stateProofs, m.signerPriv, m.internalKeyPriv, m.btcNetworkParams)
+		switch res.Code {
+		case bitcoin.StatusSuccess:
+			m.logger.Info("successfully submitted Rollkit blocks to Bitcoin", "message", res.Message, "submit hash", res.SubmitHash)
+			submittedAllBlocks = true
+
+			// record submitted proofs to bitcoin
+			for _, block := range blocksToSubmit {
+				m.btcBlockCache.setBtcIncluded(string(block.BlockProofs))
+			}
+
+			// set last submitted proofs height
+			lastSubmittedHeight := uint64(0)
+			if l := len(blocksToSubmit); l > 0 {
+				lastSubmittedHeight = blocksToSubmit[l-1].Height
+			}
+			m.pendingBlocks.setLastSubmittedHeight(ctx, lastSubmittedHeight)
+
+			// reset exponential backoff
+			backoff = 0
+		default:
+			m.logger.Error("Bitcoin layer submission failed", "code", res.Code, "error", res.Message, "attempt", attempt)
+			backoff = m.exponentialBtcBackoff(backoff)
+		}
+
+		attempt += 1
+	}
+
+	return resErr
+}
+
 func (m *Manager) exponentialBackoff(backoff time.Duration) time.Duration {
 	backoff *= 2
 	if backoff == 0 {
@@ -1179,6 +1278,17 @@ func (m *Manager) exponentialBackoff(backoff time.Duration) time.Duration {
 	}
 	if backoff > m.conf.DABlockTime {
 		backoff = m.conf.DABlockTime
+	}
+	return backoff
+}
+
+func (m *Manager) exponentialBtcBackoff(backoff time.Duration) time.Duration {
+	backoff *= 2
+	if backoff == 0 {
+		backoff = initialBackoff
+	}
+	if backoff > m.conf.BtcBlockTime {
+		backoff = m.conf.BtcBlockTime
 	}
 	return backoff
 }
