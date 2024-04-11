@@ -156,6 +156,10 @@ func getInitialState(store store.Store, genesis *cmtypes.GenesisDoc) (types.Stat
 		if uint64(genesis.InitialHeight) > s.LastBlockHeight {
 			return types.State{}, fmt.Errorf("genesis.InitialHeight (%d) is greater than last stored state's LastBlockHeight (%d)", genesis.InitialHeight, s.LastBlockHeight)
 		}
+
+		if uint64(genesis.InitialHeight) > s.LastBtcRollupsBlockHeight {
+			return types.State{}, fmt.Errorf("genesis.InitialHeight (%d) is greater than last stored state's LastBtcRollupsBlockHeight (%d)", genesis.InitialHeight, s.LastBtcRollupsBlockHeight)
+		}
 	}
 
 	return s, nil
@@ -180,6 +184,7 @@ func NewManager(
 	s, err := getInitialState(store, genesis)
 	//set block height in store
 	store.SetHeight(context.Background(), s.LastBlockHeight)
+	store.SetBtcRollupsHeight(context.Background(), s.LastBtcRollupsBlockHeight)
 
 	if err != nil {
 		return nil, err
@@ -329,6 +334,11 @@ func (m *Manager) SetLastState(state types.State) {
 // GetStoreHeight returns the manager's store height
 func (m *Manager) GetStoreHeight() uint64 {
 	return m.store.Height()
+}
+
+// GetBtcRollupsHeight returns the manager's store btc rollups height
+func (m *Manager) GetBtcRollupsHeight() uint64 {
+	return m.store.BtcRollupsHeight()
 }
 
 // GetBlockInCh returns the manager's blockInCh
@@ -488,16 +498,18 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 				"btcHeight", btcHeight,
 				"hash", blockHash,
 			)
+
 			if blockHeight <= m.store.BtcRollupsHeight() || m.btcBlockCache.isSeen(blockHash) {
 				m.logger.Debug("block already seen", "height", blockHeight, "block hash", blockHash)
 				continue
 			}
-			m.btcBlockCache.setBlock(blockHeight, block)
-
 			m.sendNonBlockingSignalToRetrieveBtcCh()
 
 			// proofs from bitcoin are used for verification, it needs to work along side block syncing
 			// block syncing process will fetch stored roll ups block to compare results
+			m.btcBlockCache.setBlock(blockHeight, block)
+			m.btcBlockCache.setSeen(blockHash)
+			m.store.SetBtcRollupsHeight(ctx, blockHeight)
 
 		case <-ctx.Done():
 			return
@@ -1234,4 +1246,11 @@ func updateState(s *types.State, res *abci.ResponseInitChain) {
 	// We update the last results hash with the empty hash, to conform with RFC-6962.
 	s.LastResultsHash = merkle.HashFromByteSlices(nil)
 
+}
+
+// ######### For testing #########
+
+// get btc roll ups block from cache
+func (m *Manager) GetBtcRollUpsBlockFromCache(height uint64) (*btctypes.RollUpsBlock, bool) {
+	return m.btcBlockCache.getBlock(height)
 }

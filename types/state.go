@@ -38,6 +38,9 @@ type State struct {
 	LastBlockID     types.BlockID
 	LastBlockTime   time.Time
 
+	// LastBtcRollupsBlockHeight=0 at genesis (ie. block(H=0) does not exist)
+	LastBtcRollupsBlockHeight uint64
+
 	// DAHeight identifies DA block containing the latest applied Rollkit block.
 	DAHeight  uint64
 	BtcHeight uint64
@@ -70,11 +73,14 @@ func NewFromGenesisDoc(genDoc *types.GenesisDoc) (State, error) {
 		ChainID:       genDoc.ChainID,
 		InitialHeight: uint64(genDoc.InitialHeight),
 
-		DAHeight: 1,
+		DAHeight:  1,
+		BtcHeight: 1,
 
 		LastBlockHeight: uint64(genDoc.InitialHeight) - 1,
 		LastBlockID:     types.BlockID{},
 		LastBlockTime:   genDoc.GenesisTime,
+
+		LastBtcRollupsBlockHeight: uint64(genDoc.InitialHeight) - 1,
 
 		ConsensusParams: cmproto.ConsensusParams{
 			Block: &cmproto.BlockParams{

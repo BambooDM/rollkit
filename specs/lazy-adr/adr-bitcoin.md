@@ -69,9 +69,10 @@ manager responsibilities:
 1. retrieve latest blocks from bitcoin `BtcRetrieveLoop` independently from DA block fetching
 * every new block event will be pushed into btcBlockInCh channel for later processing
 
-2. syncing bitcoin blocks `SyncLoop()`
-
-
+2. syncing bitcoin blocks `SyncLoop()`:
+* retrieved bitcoin rollups block latest height is not guaranteed to be on the same height as blocks retrieved from DA layer
+* proofs from bitcoin are used for verification, it needs to work along side block syncing. Block syncing process will fetch stored roll ups block to compare results
+* btc roll ups block start from 1
 
 mechanism understanding:
 * how block syncing happens, why it has to stay together NewBlockEvent

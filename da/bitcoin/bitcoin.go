@@ -437,7 +437,6 @@ out:
 				if data == nil {
 					break out
 				}
-				fmt.Printf("data extracted at iteration %d: %v\n", i, data)
 				tplEntry.extractedData = append(tplEntry.extractedData, data...)
 				tokenizer.Next()
 			}

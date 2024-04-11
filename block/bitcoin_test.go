@@ -27,8 +27,6 @@ import (
 	btctypes "github.com/rollkit/rollkit/types/pb/bitcoin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -39,12 +37,12 @@ const (
 	MockChainID        = "testnet"
 )
 
-func submitStateProofs(t *testing.T, btcClient *bitcoin.BitcoinClient) {
+func submitStateProofs(t *testing.T, btcClient *bitcoin.BitcoinClient, start, end uint64) {
 	state := btctypes.StateProofs{
 		Blocks: []*btctypes.RollUpsBlock{},
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := start; i < end; i++ {
 		state.Blocks = append(state.Blocks, &btctypes.RollUpsBlock{
 			BlockProofs:   []byte(fmt.Sprintf("blockproofs-%d", i)),
 			TxOrderProofs: []byte(fmt.Sprintf("txorderproofs-%d", i)),
@@ -60,8 +58,8 @@ func submitStateProofs(t *testing.T, btcClient *bitcoin.BitcoinClient) {
 	t.Logf("SubmitStateProofs: %+v\n", res)
 }
 
-// go test -v -run ^TestFetchBitcoinBlocks$ github.com/rollkit/rollkit/block
-func TestFetchBitcoinBlocks(t *testing.T) {
+// go test -v -run ^TestSyncBitcoinBlocks$ github.com/rollkit/rollkit/block
+func TestSyncBitcoinBlocks(t *testing.T) {
 	// create a bitcoin client instance
 	nodeConfig := config.NodeConfig{
 		// regtest network
@@ -83,29 +81,11 @@ func TestFetchBitcoinBlocks(t *testing.T) {
 	assert.NotNil(t, manager)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
-	btcChannel := manager.GetBtcBlockInCh()
-	blocks := []block.NewBtcBlockEvent{}
-	// function to get roll up blocks from bitcoin layer
+	// function to sync roll up blocks from bitcoin layer
 	go func() {
-		for {
-			select {
-			case btcBlock := <-btcChannel:
-				t.Logf("Received block: %+v", btcBlock)
-				blocks = append(blocks, btcBlock)
-			default:
-				t.Logf("No block received")
-			}
-
-			if len(blocks) == 5 {
-				break
-			}
-
-			time.Sleep(3 * time.Second)
-		}
-
-		wg.Done()
+		manager.SyncLoop(context.Background(), nil)
 	}()
 
 	// function to retrieve bitcoin blocks
@@ -115,18 +95,37 @@ func TestFetchBitcoinBlocks(t *testing.T) {
 
 	// function to commit roll up blocks
 	go func() {
-		submitStateProofs(t, btcClient)
+		// send three batches
+		var i uint64
+		for i = 0; i < 3; i++ {
+			submitStateProofs(t, btcClient, i*5+1, (i+1)*5+1)
+			time.Sleep(regTestBlockTime)
+		}
 		wg.Done()
 	}()
 
 	// wait for all processes to finish
 	wg.Wait()
 
-	assert.Equal(t, 5, len(blocks))
+	height := uint64(1)
+	// try fetching all 15 roll ups blocks
+	// function to get results from state
+	blocks := []*btctypes.RollUpsBlock{}
+	for height <= 15 {
+		t.Logf("height: %d\n", height)
+		block, exists := manager.GetBtcRollUpsBlockFromCache(height)
+		if exists {
+			blocks = append(blocks, block)
+			t.Logf("blocks: %+v\n", blocks)
+			height++
+		}
+	}
+
+	assert.Equal(t, 15, len(blocks))
 	for i, block := range blocks {
-		assert.Equal(t, uint64(i), block.Block.Height)
-		assert.Equal(t, fmt.Sprintf("blockproofs-%d", i), string(block.Block.BlockProofs))
-		assert.Equal(t, fmt.Sprintf("txorderproofs-%d", i), string(block.Block.TxOrderProofs))
+		assert.Equal(t, uint64(i+1), block.Height)
+		assert.Equal(t, fmt.Sprintf("blockproofs-%d", i+1), string(block.BlockProofs))
+		assert.Equal(t, fmt.Sprintf("txorderproofs-%d", i+1), string(block.TxOrderProofs))
 	}
 }
 
@@ -145,6 +144,7 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 	blockManagerConfig := config.BlockManagerConfig{
 		BlockTime:      1 * time.Second,
 		BtcStartHeight: uint64(height),
+		BtcBlockTime:   regTestBlockTime,
 	}
 
 	baseKV, err := initBaseKV(config.NodeConfig{}, log.TestingLogger())
@@ -156,8 +156,9 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 
 	// create a da client
 	daClient, err := initDALC(config.NodeConfig{
-		DAAddress:   "localhost:36650",
+		DAAddress:   "grpc://localhost:36650",
 		DANamespace: MockNamespace,
+		DAAuthToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdfQ.IMt57YStHU4ozdxXu3yH6RJhLCrH1v4rRdPyySOe0bw",
 	}, log.NewNopLogger())
 	if err != nil {
 		return nil, err
@@ -209,11 +210,11 @@ func initDALC(nodeConfig config.NodeConfig, logger log.Logger) (*da.DAClient, er
 	if err != nil {
 		return nil, fmt.Errorf("error decoding namespace: %w", err)
 	}
-	daClient := goDAProxy.NewClient()
-	err = daClient.Start(nodeConfig.DAAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	daClient, err := goDAProxy.NewClient(nodeConfig.DAAddress, nodeConfig.DAAuthToken)
 	if err != nil {
-		return nil, fmt.Errorf("error while establishing GRPC connection to DA layer: %w", err)
+		return nil, fmt.Errorf("error while creating DA client: %w", err)
 	}
+
 	return &da.DAClient{DA: daClient, Namespace: namespace, GasPrice: nodeConfig.DAGasPrice, GasMultiplier: nodeConfig.DAGasMultiplier, Logger: logger.With("module", "da_client")}, nil
 }
 
