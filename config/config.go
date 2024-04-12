@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	cmcfg "github.com/cometbft/cometbft/config"
 
 	"github.com/spf13/cobra"
@@ -85,6 +86,12 @@ type BlockManagerConfig struct {
 	BtcBlockTime time.Duration `mapstructure:"btc_block_time"`
 	// BtcStartHeight allows skipping first BtcStartHeight-1 blocks when querying for Bitcoin blocks.
 	BtcStartHeight uint64 `mapstructure:"btc_start_height"`
+	// Btc signer private
+	BtcSignerPriv string `mapstructure:"btc_signer_priv"`
+	// Btc signer internal private
+	BtcSignerInternalPriv string `mapstructure:"btc_signer_internal_priv"`
+	// Btc network configurations params
+	BtcNetworkParams *chaincfg.Params `mapstructure:",squash"`
 }
 
 // BitcoinManagerConfig consists of all parameters required to setup bitcoin client

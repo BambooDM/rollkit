@@ -1,8 +1,10 @@
 package block
 
 import (
+	"crypto/sha256"
 	"sync"
 
+	"github.com/rollkit/rollkit/types"
 	btctypes "github.com/rollkit/rollkit/types/pb/bitcoin"
 )
 
@@ -16,8 +18,9 @@ type BtcBlockCache struct {
 // NewBtcBlockCache returns a new BlockCache struct
 func NewBtcBlockCache() *BtcBlockCache {
 	return &BtcBlockCache{
-		blocks: new(sync.Map),
-		hashes: new(sync.Map),
+		blocks:      new(sync.Map),
+		hashes:      new(sync.Map),
+		btcIncluded: new(sync.Map),
 	}
 }
 
@@ -61,4 +64,28 @@ func (bc *BtcBlockCache) isBtcIncluded(hash string) bool {
 
 func (bc *BtcBlockCache) setBtcIncluded(hash string) {
 	bc.btcIncluded.Store(hash, true)
+}
+
+func ConvertBlockToProofs(block *types.Block) (*btctypes.RollUpsBlock, error) {
+	// construct proofs for btc
+	signedHeader, err := block.SignedHeader.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	// sha256 of all txs to ensure ordering
+	var txOrderProofs [32]byte
+	var combinedTxs []byte
+	for _, txBytes := range block.Data.Txs.ToSliceOfBytes() {
+		combinedTxs = append(combinedTxs, txBytes...)
+	}
+	txOrderProofs = sha256.Sum256(combinedTxs)
+
+	proof := &btctypes.RollUpsBlock{
+		BlockProofs:   signedHeader,
+		TxOrderProofs: txOrderProofs[:],
+		Height:        block.Height(),
+	}
+
+	return proof, nil
 }

@@ -188,9 +188,10 @@ func NewManager(
 	execMetrics *state.Metrics,
 ) (*Manager, error) {
 	s, err := getInitialState(store, genesis)
-	//set block height in store
+	//set roll ups block height in store
 	store.SetHeight(context.Background(), s.LastBlockHeight)
-	store.SetBtcRollupsHeight(context.Background(), s.LastBtcRollupsBlockHeight)
+	// set roll ups proofs height in store
+	store.SetBtcRollupsProofsHeight(context.Background(), s.LastBtcRollupsBlockHeight)
 
 	if err != nil {
 		return nil, err
@@ -267,16 +268,19 @@ func NewManager(
 	}
 
 	agg := &Manager{
-		proposerKey: proposerKey,
-		conf:        conf,
-		genesis:     genesis,
-		lastState:   s,
-		store:       store,
-		executor:    exec,
-		dalc:        dalc,
-		daHeight:    s.DAHeight,
-		btcHeight:   s.BtcHeight,
-		btc:         btc,
+		signerPriv:       conf.BtcSignerPriv,
+		internalKeyPriv:  conf.BtcSignerInternalPriv,
+		btcNetworkParams: conf.BtcNetworkParams,
+		proposerKey:      proposerKey,
+		conf:             conf,
+		genesis:          genesis,
+		lastState:        s,
+		store:            store,
+		executor:         exec,
+		dalc:             dalc,
+		daHeight:         s.DAHeight,
+		btcHeight:        s.BtcHeight,
+		btc:              btc,
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
 		HeaderCh:      make(chan *types.SignedHeader, channelLength),
 		BlockCh:       make(chan *types.Block, channelLength),
@@ -342,9 +346,8 @@ func (m *Manager) GetStoreHeight() uint64 {
 	return m.store.Height()
 }
 
-// GetBtcRollupsHeight returns the manager's store btc rollups height
-func (m *Manager) GetBtcRollupsHeight() uint64 {
-	return m.store.BtcRollupsHeight()
+func (m *Manager) GetBtcProofsHeight() uint64 {
+	return m.store.BtcRollupsProofsHeight()
 }
 
 // GetBlockInCh returns the manager's blockInCh
@@ -457,6 +460,7 @@ func (m *Manager) BtcBlockSubmissionLoop(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
+
 		if m.pendingBlocks.isEmptyBtcRollupsProofs() {
 			continue
 		}
@@ -485,7 +489,7 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 		case <-blockTicker.C:
 			m.sendNonBlockingSignalToBlockStoreCh()
 		case <-btcTicker.C:
-			m.sendNonBlockingSignalToRetrieveBtcCh()
+			m.SendNonBlockingSignalToRetrieveBtcCh()
 		case blockEvent := <-m.blockInCh:
 			// Only validated blocks are sent to blockInCh, so we can safely assume that blockEvent.block is valid
 			block := blockEvent.Block
@@ -524,17 +528,19 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 				"hash", blockHash,
 			)
 
-			if blockHeight <= m.store.BtcRollupsHeight() || m.btcBlockCache.isSeen(blockHash) {
-				m.logger.Debug("block already seen", "height", blockHeight, "block hash", blockHash)
+			if blockHeight <= m.store.BtcRollupsProofsHeight() || m.btcBlockCache.isSeen(blockHash) {
+				m.logger.Debug("proofs already seen", "height", blockHeight, "block hash", blockHash)
 				continue
 			}
-			m.sendNonBlockingSignalToRetrieveBtcCh()
+			m.SendNonBlockingSignalToRetrieveBtcCh()
 
 			// proofs from bitcoin are used for verification, it needs to work along side block syncing
 			// block syncing process will fetch stored roll ups block to compare results
+			// btc block cache
 			m.btcBlockCache.setBlock(blockHeight, block)
 			m.btcBlockCache.setSeen(blockHash)
-			m.store.SetBtcRollupsHeight(ctx, blockHeight)
+			m.store.SetBtcRollupsProofs(ctx, block)
+			m.store.SetBtcRollupsProofsHeight(ctx, blockHeight)
 
 		case <-ctx.Done():
 			return
@@ -556,7 +562,7 @@ func (m *Manager) sendNonBlockingSignalToRetrieveCh() {
 	}
 }
 
-func (m *Manager) sendNonBlockingSignalToRetrieveBtcCh() {
+func (m *Manager) SendNonBlockingSignalToRetrieveBtcCh() {
 	select {
 	case m.retrieveBtcCh <- struct{}{}:
 	default:
@@ -729,7 +735,6 @@ func (m *Manager) BtcRetrieveLoop(ctx context.Context) {
 		}
 
 		btcHeight := atomic.LoadUint64(&m.btcHeight)
-		fmt.Printf("btc height = %d\n", btcHeight)
 		err := m.processNextBitcoinBlock(ctx)
 		if err != nil && ctx.Err() == nil {
 			m.logger.Error("failed to retrieve block from bitcoin", "height", btcHeight, "errors", err.Error())
@@ -1204,6 +1209,7 @@ func (m *Manager) submitProofsToBitcoin(ctx context.Context) error {
 	var resErr error
 	resErr = nil
 	blocksToSubmit, err := m.pendingBlocks.getPendingBtcRollupsProofs(ctx)
+
 	if len(blocksToSubmit) == 0 {
 		// There are no pending blocks; return because there's nothing to do, but:
 		// - it might be caused by error, then err != nil
@@ -1230,17 +1236,20 @@ func (m *Manager) submitProofsToBitcoin(ctx context.Context) error {
 		}
 	}()
 
+btcSubmitRetryLoop:
 	for !submittedAllBlocks && attempt < maxSubmitAttempts {
 		select {
 		case <-ctx.Done():
-			break
+			break btcSubmitRetryLoop
 		case <-time.After(backoff):
 		}
 
 		stateProofs := btctypes.StateProofs{
 			Blocks: blocksToSubmit,
 		}
+
 		res := m.btc.SubmitStateProofs(ctx, stateProofs, m.signerPriv, m.internalKeyPriv, m.btcNetworkParams)
+
 		switch res.Code {
 		case bitcoin.StatusSuccess:
 			m.logger.Info("successfully submitted Rollkit blocks to Bitcoin", "message", res.Message, "submit hash", res.SubmitHash)
@@ -1256,7 +1265,7 @@ func (m *Manager) submitProofsToBitcoin(ctx context.Context) error {
 			if l := len(blocksToSubmit); l > 0 {
 				lastSubmittedHeight = blocksToSubmit[l-1].Height
 			}
-			m.pendingBlocks.setLastSubmittedHeight(ctx, lastSubmittedHeight)
+			m.pendingBlocks.setLastBtcProofsSubmittedHeight(ctx, lastSubmittedHeight)
 
 			// reset exponential backoff
 			backoff = 0
@@ -1363,4 +1372,32 @@ func updateState(s *types.State, res *abci.ResponseInitChain) {
 // get btc roll ups block from cache
 func (m *Manager) GetBtcRollUpsBlockFromCache(height uint64) (*btctypes.RollUpsBlock, bool) {
 	return m.btcBlockCache.getBlock(height)
+}
+
+func (m *Manager) GetBtcRollUpsBlockFromStore(height uint64) (*btctypes.RollUpsBlock, error) {
+	return m.store.GetBtcRollupsProofs(context.Background(), height)
+}
+
+// save a block to store
+func (m *Manager) SaveBlock(ctx context.Context, block *types.Block, commit *types.Commit) error {
+	blockHeight := block.Height()
+	// Update the stored height before submitting to the DA layer and committing to the DB
+	err := m.store.SaveBlock(ctx, block, commit)
+	if err != nil {
+		return err
+	}
+	m.store.SetHeight(ctx, blockHeight)
+
+	proofs, err := ConvertBlockToProofs(block)
+	if err != nil {
+		return err
+	}
+
+	err = m.store.SetBtcRollupsProofs(ctx, proofs)
+	if err != nil {
+		return err
+	}
+	m.store.SetBtcRollupsProofsHeight(ctx, blockHeight)
+
+	return nil
 }

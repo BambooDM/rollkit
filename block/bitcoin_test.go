@@ -121,7 +121,7 @@ func TestSyncBitcoinBlocks(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 15, len(blocks))
+	assert.Equal(t, uint64(15), manager.GetBtcProofsHeight())
 	for i, block := range blocks {
 		assert.Equal(t, uint64(i+1), block.Height)
 		assert.Equal(t, fmt.Sprintf("blockproofs-%d", i+1), string(block.BlockProofs))
@@ -131,7 +131,91 @@ func TestSyncBitcoinBlocks(t *testing.T) {
 
 // go test -v -run ^TestBtcBlockSubmissionLoop$ github.com/rollkit/rollkit/block
 func TestBtcBlockSubmissionLoop(t *testing.T) {
+	nodeConfig := config.NodeConfig{
+		// regtest network
+		// host: "localhost:18443"
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost: "0.0.0.0:18443",
+			BtcUser: "regtest",
+			BtcPass: "regtest",
+			// enable http post mode which is bitcoin node default
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
+		},
+	}
+	btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger())
+	assert.NoError(t, err)
 
+	manager, err := NewMockManager(btcClient)
+	assert.NoError(t, err)
+	assert.NotNil(t, manager)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// block submission loop
+	go func() {
+		manager.BtcBlockSubmissionLoop(context.Background())
+	}()
+
+	// add more blocks
+	go func() {
+		// save 20 blocks into the block store
+		// this should trigger btc block submission loop
+		for i := 1; i <= 20; i++ {
+			block := types.GetRandomBlock(uint64(i), 10)
+
+			t.Logf("creating block %d with height: %d\n", i, block.Height())
+
+			err := manager.SaveBlock(context.Background(), block, &block.SignedHeader.Commit)
+			assert.NoError(t, err)
+			// block time of 1 second
+			time.Sleep(1 * time.Second)
+		}
+
+		wg.Done()
+	}()
+
+	go func() {
+		manager.BtcRetrieveLoop(context.Background())
+	}()
+
+	// try scanning bitcoin layer for 20 submitted roll up proofs
+	proofs := []*btctypes.RollUpsBlock{}
+	go func() {
+		btcBlockChannel := manager.GetBtcBlockInCh()
+		for {
+			t.Log("fetching proofs from bitcoin")
+			select {
+			case btcBlockEvent := <-btcBlockChannel:
+				block := btcBlockEvent.Block
+				proofs = append(proofs, block)
+			default:
+				manager.SendNonBlockingSignalToRetrieveBtcCh()
+			}
+
+			if len(proofs) == 20 {
+				break
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+
+		wg.Done()
+	}()
+
+	// wait for all processes to finish
+	wg.Wait()
+
+	// ensure that stored local proofs are equal to the ones fetched from bitcoin
+	assert.Equal(t, uint64(20), manager.GetBtcProofsHeight())
+	for _, proof := range proofs {
+		localProofs, err := manager.GetBtcRollUpsBlockFromStore(proof.Height)
+		assert.NoError(t, err)
+		assert.Equal(t, localProofs.Height, proof.Height)
+		assert.Equal(t, localProofs.BlockProofs, proof.BlockProofs)
+		assert.Equal(t, localProofs.TxOrderProofs, proof.TxOrderProofs)
+	}
 }
 
 func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
@@ -147,10 +231,15 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 	}
 
 	blockManagerConfig := config.BlockManagerConfig{
-		BlockTime:      1 * time.Second,
-		BtcStartHeight: uint64(height),
-		BtcBlockTime:   regTestBlockTime,
+		BlockTime:             1 * time.Second,
+		BtcStartHeight:        uint64(height),
+		BtcBlockTime:          regTestBlockTime,
+		BtcSignerPriv:         bobPrivateKey,
+		BtcSignerInternalPriv: internalPrivateKey,
+		BtcNetworkParams:      &chaincfg.RegressionNetParams,
 	}
+
+	blockManagerConfig.BtcNetworkParams.DefaultPort = "18443"
 
 	baseKV, err := initBaseKV(config.NodeConfig{}, log.TestingLogger())
 	if err != nil {

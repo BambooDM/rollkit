@@ -72,7 +72,7 @@ manager responsibilities:
 2. syncing bitcoin blocks `SyncLoop()`:
 * retrieved bitcoin rollups block latest height is not guaranteed to be on the same height as blocks retrieved from DA layer
 * proofs from bitcoin are used for verification, it needs to work along side block syncing. Block syncing process will fetch stored roll ups block to compare results
-* btc roll ups block start from 1
+* btc roll ups block start from 1, bitcoin rollups proofs will be fetched into store for future verification
 
 3. submit proofs to bitcoin layer:
 * track pending proofs to be submitted to bitcoin
@@ -84,6 +84,9 @@ mechanism understanding:
 * celestia uses ipfs block store to persist blocks
 * rollkit fetches block stores `BlockStoreRetrieveLoop` and then feed it into a channel for later processing, but why only one `blockInCh`? 
 * a block fetched from DA consists of many block stores from IPFS at exact da height
+* a roll ups block will be persisted into block store through 
+  * trying to catch up with blocks when syncing (trySyncNextBlock)
+  * trying to aggregate newly created transactions into a new block (publishBlock)
 
 # node integration
 fullnode integration
