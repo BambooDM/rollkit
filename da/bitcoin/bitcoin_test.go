@@ -2,9 +2,13 @@ package bitcoin_test
 
 import (
 	"context"
+	"encoding/json"
+	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/cometbft/cometbft/libs/log"
@@ -20,6 +24,48 @@ const (
 	internalPrivateKey = "5JGgKfRy6vEcWBpLJV5FXUfMGNXzvdWzQHUM1rVLEUJfvZUSwvS"
 	regTestBlockTime   = 3 * time.Second
 )
+
+// go test -count=1 -v -run ^TestRunBitcoinDaemon$ github.com/rollkit/rollkit/da/bitcoin
+func TestRunBitcoinDaemon(t *testing.T) {
+	reg := bitcoin.RegBitcoinProcess{}
+	reg.RunBitcoinProcess(t)
+	defer reg.StopBitcoinProcess(t)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	times := 0
+	go func() {
+		height := int32(0)
+		for {
+			// check that bitcoind is running
+			cmd := exec.Command("bitcoin-cli", "-regtest", "getblockchaininfo")
+			output, err := cmd.Output()
+			assert.NoError(t, err)
+
+			res := &btcjson.GetBlockChainInfoResult{}
+			err = json.Unmarshal(output, res)
+			assert.NoError(t, err)
+
+			if height < res.Blocks {
+				height = res.Blocks
+				t.Logf("current height = %d \n", height)
+				times += 1
+			}
+
+			if times == 5 {
+				break
+			}
+
+			time.Sleep(3 * time.Second)
+		}
+
+		wg.Done()
+	}()
+
+	wg.Wait()
+	assert.Equal(t, 5, times)
+}
 
 // go test -v -run ^TestRetrieveStateProofsFromBlocks$ github.com/rollkit/rollkit/da/bitcoin
 func TestRetrieveStateProofsFromBlocks(t *testing.T) {

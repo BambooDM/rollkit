@@ -71,6 +71,16 @@ func getRPC(t *testing.T) (*mocks.Application, *FullClient) {
 		config.NodeConfig{
 			DAAddress:   MockDAAddress,
 			DANamespace: MockDANamespace,
+			BitcoinManagerConfig: config.BitcoinManagerConfig{
+				BtcHost:         "localhost:18443",
+				BtcUser:         "regtest",
+				BtcPass:         "regtest",
+				BtcHTTPPostMode: true,
+				BtcDisableTLS:   true,
+			},
+			BlockManagerConfig: config.BlockManagerConfig{
+				BtcBlockTime: 3 * time.Second,
+			},
 		},
 		key,
 		signingKey,
@@ -172,7 +182,22 @@ func TestGenesisChunked(t *testing.T) {
 	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	n, _ := newFullNode(ctx, config.NodeConfig{DAAddress: MockDAAddress, DANamespace: MockDANamespace}, privKey, signingKey, proxy.NewLocalClientCreator(mockApp), genDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), test.NewFileLogger(t))
+	n, _ := newFullNode(ctx,
+		config.NodeConfig{
+			DAAddress:   MockDAAddress,
+			DANamespace: MockDANamespace,
+			BitcoinManagerConfig: config.BitcoinManagerConfig{
+				BtcHost:         "localhost:18443",
+				BtcUser:         "regtest",
+				BtcPass:         "regtest",
+				BtcHTTPPostMode: true,
+				BtcDisableTLS:   true,
+			},
+			BlockManagerConfig: config.BlockManagerConfig{
+				BtcBlockTime: 3 * time.Second,
+			},
+		},
+		privKey, signingKey, proxy.NewLocalClientCreator(mockApp), genDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), test.NewFileLogger(t))
 
 	rpc := NewFullClient(n)
 
@@ -548,7 +573,15 @@ func TestTx(t *testing.T) {
 		DANamespace: MockDANamespace,
 		Aggregator:  true,
 		BlockManagerConfig: config.BlockManagerConfig{
-			BlockTime: 1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
+			BlockTime:    1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
+			BtcBlockTime: 3 * time.Second,
+		},
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
 		}},
 		key, signingKey, proxy.NewLocalClientCreator(mockApp),
 		genesisDoc,
@@ -809,7 +842,13 @@ func TestMempool2Nodes(t *testing.T) {
 			ListenAddress: "/ip4/127.0.0.1/tcp/9001",
 		},
 		BlockManagerConfig: getBMConfig(),
-	}, key1, signingKey1, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
+		}}, key1, signingKey1, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node1)
 
@@ -819,6 +858,16 @@ func TestMempool2Nodes(t *testing.T) {
 		P2P: config.P2PConfig{
 			ListenAddress: "/ip4/127.0.0.1/tcp/9002",
 			Seeds:         "/ip4/127.0.0.1/tcp/9001/p2p/" + id1.Loggable()["peerID"].(string),
+		},
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
+		},
+		BlockManagerConfig: config.BlockManagerConfig{
+			BtcBlockTime: 3 * time.Second,
 		},
 	}, key2, signingKey2, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	require.NoError(err)
@@ -884,7 +933,15 @@ func TestStatus(t *testing.T) {
 			},
 			Aggregator: true,
 			BlockManagerConfig: config.BlockManagerConfig{
-				BlockTime: 10 * time.Millisecond,
+				BlockTime:    10 * time.Millisecond,
+				BtcBlockTime: 3 * time.Second,
+			},
+			BitcoinManagerConfig: config.BitcoinManagerConfig{
+				BtcHost:         "localhost:18443",
+				BtcUser:         "regtest",
+				BtcPass:         "regtest",
+				BtcHTTPPostMode: true,
+				BtcDisableTLS:   true,
 			},
 		},
 		key,
@@ -1017,7 +1074,15 @@ func TestFutureGenesisTime(t *testing.T) {
 		DANamespace: MockDANamespace,
 		Aggregator:  true,
 		BlockManagerConfig: config.BlockManagerConfig{
-			BlockTime: 200 * time.Millisecond,
+			BlockTime:    200 * time.Millisecond,
+			BtcBlockTime: 3 * time.Second,
+		},
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
 		}},
 		key, signingKey,
 		proxy.NewLocalClientCreator(mockApp),

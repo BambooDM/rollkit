@@ -130,6 +130,7 @@ func TestSyncBitcoinBlocks(t *testing.T) {
 }
 
 // go test -v -run ^TestBtcBlockSubmissionLoop$ github.com/rollkit/rollkit/block
+// I observed flakes in this test, where fetching proofs from bitcoin would fail to get all 20 proofs, better run it again
 func TestBtcBlockSubmissionLoop(t *testing.T) {
 	nodeConfig := config.NodeConfig{
 		// regtest network
@@ -185,7 +186,7 @@ func TestBtcBlockSubmissionLoop(t *testing.T) {
 	go func() {
 		btcBlockChannel := manager.GetBtcBlockInCh()
 		for {
-			t.Log("fetching proofs from bitcoin")
+			t.Logf("fetching proofs from bitcoin, len = %d \n", len(proofs))
 			select {
 			case btcBlockEvent := <-btcBlockChannel:
 				block := btcBlockEvent.Block
@@ -210,7 +211,7 @@ func TestBtcBlockSubmissionLoop(t *testing.T) {
 	// ensure that stored local proofs are equal to the ones fetched from bitcoin
 	assert.Equal(t, uint64(20), manager.GetBtcProofsHeight())
 	for _, proof := range proofs {
-		localProofs, err := manager.GetBtcRollUpsBlockFromStore(proof.Height)
+		localProofs, err := manager.GetBtcRollUpsBlockFromStore(context.Background(), proof.Height)
 		assert.NoError(t, err)
 		assert.Equal(t, localProofs.Height, proof.Height)
 		assert.Equal(t, localProofs.BlockProofs, proof.BlockProofs)

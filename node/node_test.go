@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	cmconfig "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/crypto/ed25519"
@@ -107,7 +108,21 @@ func setupTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, 
 
 // newTestNode creates a new test node based on the NodeType.
 func newTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, ed25519.PrivKey, error) {
-	config := config.NodeConfig{DAAddress: MockDAAddress, DANamespace: MockDANamespace}
+	config := config.NodeConfig{
+		DAAddress:   MockDAAddress,
+		DANamespace: MockDANamespace,
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
+		},
+		BlockManagerConfig: config.BlockManagerConfig{
+			BtcBlockTime: 3 * time.Second,
+		},
+	}
+
 	switch nodeType {
 	case Light:
 		config.Light = true

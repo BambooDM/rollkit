@@ -93,17 +93,12 @@ func (pb *PendingBlocks) getPendingBtcRollupsProofs(ctx context.Context) ([]*btc
 
 	proofs := make([]*btctypes.RollUpsBlock, 0, height-lastSubmitted)
 	for i := lastSubmitted + 1; i <= height; i++ {
-		block, err := pb.store.GetBlock(ctx, i)
+		proof, err := pb.store.GetBtcRollupsProofs(ctx, i)
 		if err != nil {
 			// return as much as possible + error information
 			return proofs, err
 		}
 
-		proof, err := ConvertBlockToProofs(block)
-		if err != nil {
-			// return as much as possible + error information
-			return proofs, err
-		}
 		proofs = append(proofs, proof)
 	}
 	return proofs, nil

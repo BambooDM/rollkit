@@ -73,11 +73,14 @@ manager responsibilities:
 * retrieved bitcoin rollups block latest height is not guaranteed to be on the same height as blocks retrieved from DA layer
 * proofs from bitcoin are used for verification, it needs to work along side block syncing. Block syncing process will fetch stored roll ups block to compare results
 * btc roll ups block start from 1, bitcoin rollups proofs will be fetched into store for future verification
+* **a separate btc roll ups proof store, maintaining along side block store**
 
 3. submit proofs to bitcoin layer:
 * track pending proofs to be submitted to bitcoin
 * all bitcon proofs will be submitted as **best - effort** for now, thus no use of limiting proofs batch through MaxBlobSize
-* manager will periodically publish blocks to bitcoin
+* manager will periodically publish blocks to bitcoin with two stages:
+  * AggregationLoop: a loop to aggregate transaction data into a block, to be later pushed to bitcoin
+  * BtcBlockSubmissionLoop: a loop to push btc blocks to bitcoin
 
 mechanism understanding:
 * how block syncing happens, why it has to stay together NewBlockEvent
@@ -87,6 +90,7 @@ mechanism understanding:
 * a roll ups block will be persisted into block store through 
   * trying to catch up with blocks when syncing (trySyncNextBlock)
   * trying to aggregate newly created transactions into a new block (publishBlock)
+* block persisted into block store will be later fetched by block submission loop to push those to bitcoin layer
 
 # node integration
 fullnode integration

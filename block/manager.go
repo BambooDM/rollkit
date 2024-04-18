@@ -36,6 +36,9 @@ import (
 // defaultDABlockTime is used only if DABlockTime is not configured for manager
 const defaultDABlockTime = 15 * time.Second
 
+// default btc block time is around 15 minutes
+const defaultBtcBlockTime = 15 * time.Minute
+
 // defaultBlockTime is used only if BlockTime is not configured for manager
 const defaultBlockTime = 1 * time.Second
 
@@ -211,6 +214,11 @@ func NewManager(
 	if conf.DABlockTime == 0 {
 		logger.Info("Using default DA block time", "DABlockTime", defaultDABlockTime)
 		conf.DABlockTime = defaultDABlockTime
+	}
+
+	if conf.BtcBlockTime == 0 {
+		logger.Info("Using default btc block time", "BtcBlockTime", defaultBtcBlockTime)
+		conf.BtcBlockTime = defaultBtcBlockTime
 	}
 
 	if conf.BlockTime == 0 {
@@ -460,7 +468,6 @@ func (m *Manager) BtcBlockSubmissionLoop(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-
 		if m.pendingBlocks.isEmptyBtcRollupsProofs() {
 			continue
 		}
@@ -1048,12 +1055,24 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 	blockHeight := block.Height()
 	// Update the stored height before submitting to the DA layer and committing to the DB
 	m.store.SetHeight(ctx, blockHeight)
+	m.store.SetBtcRollupsProofsHeight(ctx, blockHeight)
 
 	blockHash := block.Hash().String()
 	m.blockCache.setSeen(blockHash)
 
 	// SaveBlock commits the DB tx
 	err = m.store.SaveBlock(ctx, block, commit)
+	if err != nil {
+		return err
+	}
+
+	// set bitcoin rollups proofs
+	proofs, err := ConvertBlockToProofs(block)
+	if err != nil {
+		return err
+	}
+
+	err = m.store.SetBtcRollupsProofs(ctx, proofs)
 	if err != nil {
 		return err
 	}
@@ -1374,8 +1393,8 @@ func (m *Manager) GetBtcRollUpsBlockFromCache(height uint64) (*btctypes.RollUpsB
 	return m.btcBlockCache.getBlock(height)
 }
 
-func (m *Manager) GetBtcRollUpsBlockFromStore(height uint64) (*btctypes.RollUpsBlock, error) {
-	return m.store.GetBtcRollupsProofs(context.Background(), height)
+func (m *Manager) GetBtcRollUpsBlockFromStore(ctx context.Context, height uint64) (*btctypes.RollUpsBlock, error) {
+	return m.store.GetBtcRollupsProofs(ctx, height)
 }
 
 // save a block to store
