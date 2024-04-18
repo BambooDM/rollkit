@@ -78,9 +78,10 @@ func TestInitialStateStored(t *testing.T) {
 		AppHash:       []byte("app hash"),
 	}
 	sampleState := types.State{
-		ChainID:         "myChain",
-		InitialHeight:   1,
-		LastBlockHeight: 100,
+		ChainID:                   "myChain",
+		InitialHeight:             1,
+		LastBlockHeight:           100,
+		LastBtcRollupsBlockHeight: 100,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -89,6 +90,7 @@ func TestInitialStateStored(t *testing.T) {
 	err := store.UpdateState(ctx, sampleState)
 	require.NoError(err)
 	s, err := getInitialState(store, genesis)
+	t.Logf("error: %v", err)
 	require.Equal(s.LastBlockHeight, uint64(100))
 	require.NoError(err)
 	require.Equal(s.InitialHeight, uint64(1))

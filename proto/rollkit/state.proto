@@ -29,4 +29,6 @@ message State {
   bytes last_results_hash = 10;
 
   bytes app_hash = 11;
+
+  uint64 last_btc_rollups_block_height = 12;
 }

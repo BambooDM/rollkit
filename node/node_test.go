@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rollkit/rollkit/config"
+	"github.com/rollkit/rollkit/da/bitcoin"
 	test "github.com/rollkit/rollkit/test/log"
 	"github.com/rollkit/rollkit/types"
 
@@ -45,10 +46,15 @@ func TestMain(m *testing.M) {
 	if srv == nil {
 		os.Exit(1)
 	}
+
+	btcRegProcess := bitcoin.RegBitcoinProcess{}
+	btcRegProcess.RunBitcoinProcess()
+
 	exitCode := m.Run()
 
 	// teardown servers
 	srv.GracefulStop()
+	btcRegProcess.Stop()
 
 	os.Exit(exitCode)
 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/url"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +19,8 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	ktds "github.com/ipfs/go-datastore/keytransform"
 	goDAProxy "github.com/rollkit/go-da/proxy"
+	goDAproxyGrpc "github.com/rollkit/go-da/proxy/grpc"
+	goDATest "github.com/rollkit/go-da/test"
 	"github.com/rollkit/rollkit/block"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/da"
@@ -27,6 +32,8 @@ import (
 	btctypes "github.com/rollkit/rollkit/types/pb/bitcoin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -35,7 +42,40 @@ const (
 	regTestBlockTime   = 3 * time.Second
 	MockNamespace      = "00000000000000000000000000000000000000000000000000deadbeef"
 	MockChainID        = "testnet"
+
+	MockDAAddress = "grpc://localhost:7980"
 )
+
+func TestMain(m *testing.M) {
+	srv := startMockGRPCServ()
+	if srv == nil {
+		os.Exit(1)
+	}
+
+	reg := bitcoin.RegBitcoinProcess{}
+	reg.RunBitcoinProcess()
+	defer func() {
+		srv.GracefulStop()
+		reg.Stop()
+	}()
+
+	// this will try to run multiple tests at the same time
+	exitCode := m.Run()
+	os.Exit(exitCode)
+}
+
+func startMockGRPCServ() *grpc.Server {
+	srv := goDAproxyGrpc.NewServer(goDATest.NewDummyDA(), grpc.Creds(insecure.NewCredentials()))
+	addr, _ := url.Parse(MockDAAddress)
+	lis, err := net.Listen("tcp", addr.Host)
+	if err != nil {
+		panic(err)
+	}
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	return srv
+}
 
 func submitStateProofs(t *testing.T, btcClient *bitcoin.BitcoinClient, start, end uint64) {
 	state := btctypes.StateProofs{
@@ -129,8 +169,9 @@ func TestSyncBitcoinBlocks(t *testing.T) {
 	}
 }
 
-// go test -v -run ^TestBtcBlockSubmissionLoop$ github.com/rollkit/rollkit/block
+// go test -v -count=1 -run ^TestBtcBlockSubmissionLoop$ github.com/rollkit/rollkit/block
 // I observed flakes in this test, where fetching proofs from bitcoin would fail to get all 20 proofs, better run it again
+// cached content can mess this up
 func TestBtcBlockSubmissionLoop(t *testing.T) {
 	nodeConfig := config.NodeConfig{
 		// regtest network
@@ -190,6 +231,15 @@ func TestBtcBlockSubmissionLoop(t *testing.T) {
 			select {
 			case btcBlockEvent := <-btcBlockChannel:
 				block := btcBlockEvent.Block
+				// basic check before allowed to add into proofs
+				if len(block.BlockProofs) != 479 {
+					continue
+				}
+
+				if len(block.TxOrderProofs) != 32 {
+					continue
+				}
+
 				proofs = append(proofs, block)
 			default:
 				manager.SendNonBlockingSignalToRetrieveBtcCh()
@@ -251,9 +301,8 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 
 	// create a da client
 	daClient, err := initDALC(config.NodeConfig{
-		DAAddress:   "grpc://localhost:36650",
+		DAAddress:   MockDAAddress,
 		DANamespace: MockNamespace,
-		DAAuthToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdfQ.IMt57YStHU4ozdxXu3yH6RJhLCrH1v4rRdPyySOe0bw",
 	}, log.NewNopLogger())
 	if err != nil {
 		return nil, err

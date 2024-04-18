@@ -21,6 +21,7 @@ import (
 	proxygrpc "github.com/rollkit/go-da/proxy/grpc"
 	proxyjsonrpc "github.com/rollkit/go-da/proxy/jsonrpc"
 	goDATest "github.com/rollkit/go-da/test"
+	"github.com/rollkit/rollkit/da/bitcoin"
 	"github.com/rollkit/rollkit/da/mock"
 	"github.com/rollkit/rollkit/types"
 )
@@ -55,12 +56,17 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	grpcSrv := startMockDAServGRPC()
+
+	btcRegProcess := bitcoin.RegBitcoinProcess{}
+	btcRegProcess.RunBitcoinProcess()
+
 	exitCode := m.Run()
 
 	// teardown servers
 	// nolint:errcheck,gosec
 	jsonrpcSrv.Stop(context.Background())
 	grpcSrv.Stop()
+	btcRegProcess.Stop()
 
 	os.Exit(exitCode)
 }

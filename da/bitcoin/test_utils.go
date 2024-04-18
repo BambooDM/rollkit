@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os/exec"
 	"syscall"
-	"testing"
 	"time"
 )
 
@@ -20,7 +19,7 @@ type RegBitcoinProcess struct {
 	Cmd *exec.Cmd
 }
 
-func (reg *RegBitcoinProcess) RunBitcoinProcess(t *testing.T) {
+func (reg *RegBitcoinProcess) RunBitcoinProcess() {
 	// setup bitcoin node running in regtest mode
 	rpcUser := fmt.Sprintf("-rpcuser=%s", MockBtcUser)
 	rpcPass := fmt.Sprintf("-rpcpassword=%s", MockBtcPass)
@@ -40,7 +39,6 @@ func (reg *RegBitcoinProcess) RunBitcoinProcess(t *testing.T) {
 	// generate blocks
 	go func() {
 		for {
-			t.Log("generating bitcoin block")
 			err := exec.Command("bitcoin-cli", "-regtest", "-generate").Run()
 			if err != nil {
 				panic(err)
@@ -50,12 +48,8 @@ func (reg *RegBitcoinProcess) RunBitcoinProcess(t *testing.T) {
 	}()
 }
 
-func (reg *RegBitcoinProcess) StopBitcoinProcess(t *testing.T) {
-	t.Logf("cmd = %v, process = %v\n", reg.Cmd, reg.Cmd.Process)
-
+func (reg *RegBitcoinProcess) Stop() {
 	if reg.Cmd != nil && reg.Cmd.Process != nil {
-		t.Log("killing bitcoin regtest process")
-
 		err := reg.Cmd.Process.Kill()
 		if err != nil {
 			panic(err)

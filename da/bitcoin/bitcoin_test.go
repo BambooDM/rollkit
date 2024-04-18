@@ -3,6 +3,7 @@ package bitcoin_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"sync"
 	"testing"
@@ -25,11 +26,20 @@ const (
 	regTestBlockTime   = 3 * time.Second
 )
 
+func TestMain(m *testing.M) {
+	reg := bitcoin.RegBitcoinProcess{}
+	reg.RunBitcoinProcess()
+	defer reg.Stop()
+
+	exitCode := m.Run()
+	os.Exit(exitCode)
+}
+
 // go test -count=1 -v -run ^TestRunBitcoinDaemon$ github.com/rollkit/rollkit/da/bitcoin
 func TestRunBitcoinDaemon(t *testing.T) {
 	reg := bitcoin.RegBitcoinProcess{}
-	reg.RunBitcoinProcess(t)
-	defer reg.StopBitcoinProcess(t)
+	reg.RunBitcoinProcess()
+	defer reg.Stop()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
