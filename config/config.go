@@ -82,16 +82,6 @@ type BlockManagerConfig struct {
 	// MaxPendingBlocks defines limit of blocks pending DA submission. 0 means no limit.
 	// When limit is reached, aggregator pauses block production.
 	MaxPendingBlocks uint64 `mapstructure:"max_pending_blocks"`
-	// BtcBlockTime defines how often new Bitcoin blocks are produced
-	BtcBlockTime time.Duration `mapstructure:"btc_block_time"`
-	// BtcStartHeight allows skipping first BtcStartHeight-1 blocks when querying for Bitcoin blocks.
-	BtcStartHeight uint64 `mapstructure:"btc_start_height"`
-	// Btc signer private
-	BtcSignerPriv string `mapstructure:"btc_signer_priv"`
-	// Btc signer internal private
-	BtcSignerInternalPriv string `mapstructure:"btc_signer_internal_priv"`
-	// Btc network configurations params
-	BtcNetworkParams *chaincfg.Params `mapstructure:",squash"`
 }
 
 // BitcoinManagerConfig consists of all parameters required to setup bitcoin client
@@ -106,6 +96,16 @@ type BitcoinManagerConfig struct {
 	BtcHTTPPostMode bool `mapstructure:"btc_http_post_mode"`
 	// BtcDisableTLS specifies whether transport layer security should be disabled. It is recommended to always use TLS if the RPC server supports it as otherwise your username and password is sent across the wire in cleartext.
 	BtcDisableTLS bool `mapstructure:"btc_disable_tls"`
+	// BtcBlockTime defines how often new Bitcoin blocks are produced
+	BtcBlockTime time.Duration `mapstructure:"btc_block_time"`
+	// BtcStartHeight allows skipping first BtcStartHeight-1 blocks when querying for Bitcoin blocks.
+	BtcStartHeight uint64 `mapstructure:"btc_start_height"`
+	// Btc signer private
+	BtcSignerPriv string `mapstructure:"btc_signer_priv"`
+	// Btc signer internal private
+	BtcSignerInternalPriv string `mapstructure:"btc_signer_internal_priv"`
+	// Btc network configurations params
+	BtcNetworkParams *chaincfg.Params `mapstructure:",squash"`
 }
 
 // GetNodeConfig translates Tendermint's configuration into Rollkit configuration.

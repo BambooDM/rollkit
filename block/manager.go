@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
 	goheaderstore "github.com/celestiaorg/go-header/store"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmcrypto "github.com/cometbft/cometbft/crypto"
@@ -84,17 +83,13 @@ type NewBtcBlockEvent struct {
 
 // Manager is responsible for aggregating transactions into blocks.
 type Manager struct {
-	// bitcoin config
-	signerPriv       string
-	internalKeyPriv  string
-	btcNetworkParams *chaincfg.Params
-
 	lastState types.State
 	// lastStateMtx is used by lastState
 	lastStateMtx *sync.RWMutex
 	store        store.Store
 
 	conf    config.BlockManagerConfig
+	btcConf config.BitcoinManagerConfig
 	genesis *cmtypes.GenesisDoc
 
 	proposerKey crypto.PrivKey
@@ -178,6 +173,7 @@ func getInitialState(store store.Store, genesis *cmtypes.GenesisDoc) (types.Stat
 func NewManager(
 	proposerKey crypto.PrivKey,
 	conf config.BlockManagerConfig,
+	btcConf config.BitcoinManagerConfig,
 	genesis *cmtypes.GenesisDoc,
 	store store.Store,
 	mempool mempool.Mempool,
@@ -207,8 +203,8 @@ func NewManager(
 		s.DAHeight = conf.DAStartHeight
 	}
 
-	if s.BtcHeight < conf.BtcStartHeight {
-		s.BtcHeight = conf.BtcStartHeight
+	if s.BtcHeight < btcConf.BtcStartHeight {
+		s.BtcHeight = btcConf.BtcStartHeight
 	}
 
 	if conf.DABlockTime == 0 {
@@ -216,9 +212,9 @@ func NewManager(
 		conf.DABlockTime = defaultDABlockTime
 	}
 
-	if conf.BtcBlockTime == 0 {
+	if btcConf.BtcBlockTime == 0 {
 		logger.Info("Using default btc block time", "BtcBlockTime", defaultBtcBlockTime)
-		conf.BtcBlockTime = defaultBtcBlockTime
+		btcConf.BtcBlockTime = defaultBtcBlockTime
 	}
 
 	if conf.BlockTime == 0 {
@@ -276,19 +272,17 @@ func NewManager(
 	}
 
 	agg := &Manager{
-		signerPriv:       conf.BtcSignerPriv,
-		internalKeyPriv:  conf.BtcSignerInternalPriv,
-		btcNetworkParams: conf.BtcNetworkParams,
-		proposerKey:      proposerKey,
-		conf:             conf,
-		genesis:          genesis,
-		lastState:        s,
-		store:            store,
-		executor:         exec,
-		dalc:             dalc,
-		daHeight:         s.DAHeight,
-		btcHeight:        s.BtcHeight,
-		btc:              btc,
+		proposerKey: proposerKey,
+		conf:        conf,
+		btcConf:     btcConf,
+		genesis:     genesis,
+		lastState:   s,
+		store:       store,
+		executor:    exec,
+		dalc:        dalc,
+		daHeight:    s.DAHeight,
+		btcHeight:   s.BtcHeight,
+		btc:         btc,
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
 		HeaderCh:      make(chan *types.SignedHeader, channelLength),
 		BlockCh:       make(chan *types.Block, channelLength),
@@ -460,7 +454,7 @@ func (m *Manager) BlockSubmissionLoop(ctx context.Context) {
 }
 
 func (m *Manager) BtcBlockSubmissionLoop(ctx context.Context) {
-	timer := time.NewTicker(m.conf.BtcBlockTime)
+	timer := time.NewTicker(m.btcConf.BtcBlockTime)
 	defer timer.Stop()
 	for {
 		select {
@@ -487,7 +481,7 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 	defer daTicker.Stop()
 	blockTicker := time.NewTicker(m.conf.BlockTime)
 	defer blockTicker.Stop()
-	btcTicker := time.NewTicker(m.conf.BtcBlockTime)
+	btcTicker := time.NewTicker(m.btcConf.BtcBlockTime)
 	defer btcTicker.Stop()
 	for {
 		select {
@@ -534,6 +528,8 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 				"btcHeight", btcHeight,
 				"hash", blockHash,
 			)
+
+			fmt.Printf("block height %d, btc roll ups height %d\n", blockHeight, m.store.BtcRollupsProofsHeight())
 
 			if blockHeight <= m.store.BtcRollupsProofsHeight() || m.btcBlockCache.isSeen(blockHash) {
 				m.logger.Debug("proofs already seen", "height", blockHeight, "block hash", blockHash)
@@ -1257,6 +1253,8 @@ func (m *Manager) submitProofsToBitcoin(ctx context.Context) error {
 
 btcSubmitRetryLoop:
 	for !submittedAllBlocks && attempt < maxSubmitAttempts {
+		fmt.Printf("attempt %d\n", attempt)
+
 		select {
 		case <-ctx.Done():
 			break btcSubmitRetryLoop
@@ -1267,7 +1265,7 @@ btcSubmitRetryLoop:
 			Blocks: blocksToSubmit,
 		}
 
-		res := m.btc.SubmitStateProofs(ctx, stateProofs, m.signerPriv, m.internalKeyPriv, m.btcNetworkParams)
+		res := m.btc.SubmitStateProofs(ctx, stateProofs, m.btcConf.BtcSignerPriv, m.btcConf.BtcSignerInternalPriv, m.btcConf.BtcNetworkParams)
 
 		switch res.Code {
 		case bitcoin.StatusSuccess:
@@ -1315,8 +1313,8 @@ func (m *Manager) exponentialBtcBackoff(backoff time.Duration) time.Duration {
 	if backoff == 0 {
 		backoff = initialBackoff
 	}
-	if backoff > m.conf.BtcBlockTime {
-		backoff = m.conf.BtcBlockTime
+	if backoff > m.btcConf.BtcBlockTime {
+		backoff = m.btcConf.BtcBlockTime
 	}
 	return backoff
 }

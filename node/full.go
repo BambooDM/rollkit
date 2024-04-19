@@ -138,9 +138,18 @@ func newFullNode(
 		return nil, err
 	}
 
-	btc, err := InitBitcoinClient(nodeConfig, logger)
+	btc, err := InitBitcoinClient(nodeConfig, logger, genesis.ChainID)
 	if err != nil {
 		return nil, err
+	}
+
+	// if btc start height is zero, set it to the current height of bitcoin network
+	if nodeConfig.BitcoinManagerConfig.BtcStartHeight == 0 {
+		currentBtcHeight, err := btc.BtcClient.GetBlockCount()
+		if err != nil {
+			return nil, err
+		}
+		nodeConfig.BitcoinManagerConfig.BtcStartHeight = uint64(currentBtcHeight)
 	}
 
 	p2pClient, err := p2p.NewClient(nodeConfig.P2P, p2pKey, genesis.ChainID, baseKV, logger.With("module", "p2p"), p2pMetrics)
@@ -272,7 +281,7 @@ func initBlockSyncService(ctx context.Context, mainKV ds.TxnDatastore, nodeConfi
 }
 
 func initBlockManager(signingKey crypto.PrivKey, nodeConfig config.NodeConfig, genesis *cmtypes.GenesisDoc, store store.Store, mempool mempool.Mempool, proxyApp proxy.AppConns, dalc *da.DAClient, btc *bitcoin.BitcoinClient, eventBus *cmtypes.EventBus, logger log.Logger, blockSyncService *block.BlockSyncService, seqMetrics *block.Metrics, execMetrics *state.Metrics) (*block.Manager, error) {
-	blockManager, err := block.NewManager(signingKey, nodeConfig.BlockManagerConfig, genesis, store, mempool, proxyApp.Consensus(), dalc, btc, eventBus, logger.With("module", "BlockManager"), blockSyncService.BlockStore(), seqMetrics, execMetrics)
+	blockManager, err := block.NewManager(signingKey, nodeConfig.BlockManagerConfig, nodeConfig.BitcoinManagerConfig, genesis, store, mempool, proxyApp.Consensus(), dalc, btc, eventBus, logger.With("module", "BlockManager"), blockSyncService.BlockStore(), seqMetrics, execMetrics)
 	if err != nil {
 		return nil, fmt.Errorf("error while initializing BlockManager: %w", err)
 	}

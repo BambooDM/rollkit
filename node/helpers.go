@@ -46,9 +46,8 @@ func waitForFirstBlock(node Node, source Source) error {
 
 func getBMConfig() config.BlockManagerConfig {
 	return config.BlockManagerConfig{
-		DABlockTime:  100 * time.Millisecond,
-		BlockTime:    1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
-		BtcBlockTime: 3 * time.Second,
+		DABlockTime: 100 * time.Millisecond,
+		BlockTime:   1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
 	}
 }
 

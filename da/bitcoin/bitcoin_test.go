@@ -92,7 +92,7 @@ func TestRetrieveStateProofsFromBlocks(t *testing.T) {
 				BtcDisableTLS:   true,
 			},
 		}
-		btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger())
+		btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger(), "")
 		assert.NoError(t, err, "Have you started a bitcoin regtest node?")
 		assert.NotNil(t, btcClient)
 
@@ -152,7 +152,7 @@ func TestRetrieveStateProofs(t *testing.T) {
 			},
 		}
 
-		btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger())
+		btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger(), "")
 		assert.NoError(t, err, "Have you started a bitcoin regtest node?")
 		assert.NotNil(t, btcClient)
 

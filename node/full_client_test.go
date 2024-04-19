@@ -63,7 +63,7 @@ func getRPC(t *testing.T) (*mocks.Application, *FullClient) {
 	app.On("InitChain", mock.Anything, mock.Anything).Return(&abci.ResponseInitChain{}, nil)
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
 	ctx := context.Background()
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	node, err := newFullNode(
@@ -77,9 +77,7 @@ func getRPC(t *testing.T) (*mocks.Application, *FullClient) {
 				BtcPass:         "regtest",
 				BtcHTTPPostMode: true,
 				BtcDisableTLS:   true,
-			},
-			BlockManagerConfig: config.BlockManagerConfig{
-				BtcBlockTime: 3 * time.Second,
+				BtcBlockTime:    3 * time.Second,
 			},
 		},
 		key,
@@ -192,9 +190,7 @@ func TestGenesisChunked(t *testing.T) {
 				BtcPass:         "regtest",
 				BtcHTTPPostMode: true,
 				BtcDisableTLS:   true,
-			},
-			BlockManagerConfig: config.BlockManagerConfig{
-				BtcBlockTime: 3 * time.Second,
+				BtcBlockTime:    3 * time.Second,
 			},
 		},
 		privKey, signingKey, proxy.NewLocalClientCreator(mockApp), genDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), test.NewFileLogger(t))
@@ -563,7 +559,7 @@ func TestTx(t *testing.T) {
 	mockApp.On("PrepareProposal", mock.Anything, mock.Anything).Return(prepareProposalResponse).Maybe()
 	mockApp.On("ProcessProposal", mock.Anything, mock.Anything).Return(&abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil)
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -573,8 +569,7 @@ func TestTx(t *testing.T) {
 		DANamespace: MockDANamespace,
 		Aggregator:  true,
 		BlockManagerConfig: config.BlockManagerConfig{
-			BlockTime:    1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
-			BtcBlockTime: 3 * time.Second,
+			BlockTime: 1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
 		},
 		BitcoinManagerConfig: config.BitcoinManagerConfig{
 			BtcHost:         "localhost:18443",
@@ -582,6 +577,7 @@ func TestTx(t *testing.T) {
 			BtcPass:         "regtest",
 			BtcHTTPPostMode: true,
 			BtcDisableTLS:   true,
+			BtcBlockTime:    3 * time.Second,
 		}},
 		key, signingKey, proxy.NewLocalClientCreator(mockApp),
 		genesisDoc,
@@ -809,7 +805,7 @@ func TestMempool2Nodes(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey1, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 
@@ -865,9 +861,7 @@ func TestMempool2Nodes(t *testing.T) {
 			BtcPass:         "regtest",
 			BtcHTTPPostMode: true,
 			BtcDisableTLS:   true,
-		},
-		BlockManagerConfig: config.BlockManagerConfig{
-			BtcBlockTime: 3 * time.Second,
+			BtcBlockTime:    3 * time.Second,
 		},
 	}, key2, signingKey2, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	require.NoError(err)
@@ -917,7 +911,7 @@ func TestStatus(t *testing.T) {
 	app.On("PrepareProposal", mock.Anything, mock.Anything).Return(prepareProposalResponse).Maybe()
 	app.On("ProcessProposal", mock.Anything, mock.Anything).Return(&abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil)
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	pubKey := genesisDoc.Validators[0].PubKey
@@ -933,8 +927,7 @@ func TestStatus(t *testing.T) {
 			},
 			Aggregator: true,
 			BlockManagerConfig: config.BlockManagerConfig{
-				BlockTime:    10 * time.Millisecond,
-				BtcBlockTime: 3 * time.Second,
+				BlockTime: 10 * time.Millisecond,
 			},
 			BitcoinManagerConfig: config.BitcoinManagerConfig{
 				BtcHost:         "localhost:18443",
@@ -942,6 +935,7 @@ func TestStatus(t *testing.T) {
 				BtcPass:         "regtest",
 				BtcHTTPPostMode: true,
 				BtcDisableTLS:   true,
+				BtcBlockTime:    3 * time.Second,
 			},
 		},
 		key,
@@ -1063,7 +1057,7 @@ func TestFutureGenesisTime(t *testing.T) {
 	mockApp.On("Commit", mock.Anything, mock.Anything).Return(&abci.ResponseCommit{}, nil)
 	mockApp.On("CheckTx", mock.Anything, mock.Anything).Return(&abci.ResponseCheckTx{}, nil)
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	genesisTime := time.Now().Local().Add(time.Second * time.Duration(1))
@@ -1074,8 +1068,7 @@ func TestFutureGenesisTime(t *testing.T) {
 		DANamespace: MockDANamespace,
 		Aggregator:  true,
 		BlockManagerConfig: config.BlockManagerConfig{
-			BlockTime:    200 * time.Millisecond,
-			BtcBlockTime: 3 * time.Second,
+			BlockTime: 200 * time.Millisecond,
 		},
 		BitcoinManagerConfig: config.BitcoinManagerConfig{
 			BtcHost:         "localhost:18443",
@@ -1083,6 +1076,7 @@ func TestFutureGenesisTime(t *testing.T) {
 			BtcPass:         "regtest",
 			BtcHTTPPostMode: true,
 			BtcDisableTLS:   true,
+			BtcBlockTime:    3 * time.Second,
 		}},
 		key, signingKey,
 		proxy.NewLocalClientCreator(mockApp),

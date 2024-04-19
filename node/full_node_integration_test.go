@@ -55,12 +55,11 @@ func TestAggregatorMode(t *testing.T) {
 	app.On("Commit", mock.Anything, mock.Anything).Return(&abci.ResponseCommit{}, nil)
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	blockManagerConfig := config.BlockManagerConfig{
-		BlockTime:    1 * time.Second,
-		BtcBlockTime: 3 * time.Second,
+		BlockTime: 1 * time.Second,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -71,6 +70,7 @@ func TestAggregatorMode(t *testing.T) {
 			BtcPass:         "regtest",
 			BtcHTTPPostMode: true,
 			BtcDisableTLS:   true,
+			BtcBlockTime:    3 * time.Second,
 		}}, key, signingKey, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
@@ -177,7 +177,7 @@ func TestLazyAggregator(t *testing.T) {
 	app.On("Commit", mock.Anything, mock.Anything).Return(&abci.ResponseCommit{}, nil)
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	blockManagerConfig := config.BlockManagerConfig{
@@ -189,8 +189,7 @@ func TestLazyAggregator(t *testing.T) {
 		// the blocktime too short. in future, we can add a configuration
 		// in go-header syncer initialization to not rely on blocktime, but the
 		// config variable
-		BlockTime:    1 * time.Second,
-		BtcBlockTime: 3 * time.Second,
+		BlockTime: 1 * time.Second,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -206,6 +205,7 @@ func TestLazyAggregator(t *testing.T) {
 			BtcPass:         "regtest",
 			BtcHTTPPostMode: true,
 			BtcDisableTLS:   true,
+			BtcBlockTime:    3 * time.Second,
 		},
 	}, key, signingKey, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	assert.False(node.IsRunning())

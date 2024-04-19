@@ -20,6 +20,7 @@ import (
 // BitcoinClient interacts with Bitcoin layer
 type BitcoinClient struct {
 	Logger    log.Logger
+	ChainId   string
 	BtcClient *rpcclient.Client
 }
 
@@ -50,11 +51,9 @@ const (
 	StatusNotFound
 )
 
-var (
-	// PROTOCOL_ID allows data identification by looking at the first few bytes
-	// bytes representation of "mozita"
-	PROTOCOL_ID = []byte{0x6D, 0x6F, 0x7A, 0x69, 0x74, 0x61}
-)
+func (bc *BitcoinClient) chainIdToBytes() []byte {
+	return []byte(bc.ChainId)
+}
 
 // submit state proofs to bitcoin layer
 // protocol id length 6
@@ -66,7 +65,7 @@ func (bc *BitcoinClient) SubmitStateProofs(ctx context.Context, stateProofs btct
 
 	// how state proofs are marshalled to be stored in bitcoin layer
 	var data []byte
-	data = append(data, PROTOCOL_ID...)
+	data = append(data, bc.chainIdToBytes()...)
 	stateProofsBytes, err := stateProofs.Marshal()
 	if err != nil {
 		res.Code = StatusError
@@ -75,7 +74,11 @@ func (bc *BitcoinClient) SubmitStateProofs(ctx context.Context, stateProofs btct
 	}
 	data = append(data, stateProofsBytes...)
 
-	fmt.Println("data length: ", len(data))
+	bc.Logger.Debug(fmt.Sprintf("data length: %.2f KB\n", float64(len(data))/1024.0))
+	// log all submitted state proofs blocks
+	for _, block := range stateProofs.Blocks {
+		bc.Logger.Debug(fmt.Sprintf("stateProofs block: %+v with data: %v\n", block.Height, data))
+	}
 
 	// prepare taproot address for P2TR
 	address, err := createTaprootAddress(data, signerPriv, internalKeyPriv)
@@ -130,9 +133,10 @@ func (bc *BitcoinClient) RetrieveStateProofsFromTx(txs ...*wire.MsgTx) (*btctype
 			if err != nil {
 				return nil, err
 			}
-			// skip PROTOCOL_ID
-			protocol_len := len(PROTOCOL_ID)
-			if pushData != nil && bytes.HasPrefix(pushData, PROTOCOL_ID) {
+			bc.Logger.Debug(fmt.Sprintf("pushData: %v, has prefix = %v\n", pushData, bytes.HasPrefix(pushData, bc.chainIdToBytes())))
+			// skip chain id
+			protocol_len := len(bc.chainIdToBytes())
+			if pushData != nil && bytes.HasPrefix(pushData, bc.chainIdToBytes()) {
 				data = pushData[protocol_len:]
 			}
 		}

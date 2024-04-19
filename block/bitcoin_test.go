@@ -113,7 +113,7 @@ func TestSyncBitcoinBlocks(t *testing.T) {
 			BtcDisableTLS:   true,
 		},
 	}
-	btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger())
+	btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger(), "")
 	assert.NoError(t, err)
 
 	manager, err := NewMockManager(btcClient)
@@ -185,7 +185,7 @@ func TestBtcBlockSubmissionLoop(t *testing.T) {
 			BtcDisableTLS:   true,
 		},
 	}
-	btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger())
+	btcClient, err := node.InitBitcoinClient(nodeConfig, log.NewNopLogger(), "")
 	assert.NoError(t, err)
 
 	manager, err := NewMockManager(btcClient)
@@ -270,7 +270,7 @@ func TestBtcBlockSubmissionLoop(t *testing.T) {
 }
 
 func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	if err != nil {
 		return nil, err
@@ -282,7 +282,10 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 	}
 
 	blockManagerConfig := config.BlockManagerConfig{
-		BlockTime:             1 * time.Second,
+		BlockTime: 1 * time.Second,
+	}
+
+	btcManagerConfig := config.BitcoinManagerConfig{
 		BtcStartHeight:        uint64(height),
 		BtcBlockTime:          regTestBlockTime,
 		BtcSignerPriv:         bobPrivateKey,
@@ -290,7 +293,7 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 		BtcNetworkParams:      &chaincfg.RegressionNetParams,
 	}
 
-	blockManagerConfig.BtcNetworkParams.DefaultPort = "18443"
+	btcManagerConfig.BtcNetworkParams.DefaultPort = "18443"
 
 	baseKV, err := initBaseKV(config.NodeConfig{}, log.TestingLogger())
 	if err != nil {
@@ -309,8 +312,7 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 	}
 
 	// create proxy app
-	mockApp := &mocks.Application{}
-	mockApp.On("InitChain", mock.Anything, mock.Anything).Return(&abci.ResponseInitChain{}, nil)
+	mockApp := setupMockApplication()
 	_, _, _, _, abciMetrics := node.DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig())(MockChainID)
 	proxyApp, err := initProxyApp(proxy.NewLocalClientCreator(mockApp), log.NewNopLogger(), abciMetrics)
 	if err != nil {
@@ -320,6 +322,7 @@ func NewMockManager(btc *bitcoin.BitcoinClient) (*block.Manager, error) {
 	return block.NewManager(
 		signingKey,
 		blockManagerConfig,
+		btcManagerConfig,
 		genesisDoc,
 		store,
 		nil,
@@ -360,6 +363,23 @@ func initDALC(nodeConfig config.NodeConfig, logger log.Logger) (*da.DAClient, er
 	}
 
 	return &da.DAClient{DA: daClient, Namespace: namespace, GasPrice: nodeConfig.DAGasPrice, GasMultiplier: nodeConfig.DAGasMultiplier, Logger: logger.With("module", "da_client")}, nil
+}
+
+func setupMockApplication() *mocks.Application {
+	app := &mocks.Application{}
+	app.On("InitChain", mock.Anything, mock.Anything).Return(&abci.ResponseInitChain{}, nil)
+	app.On("CheckTx", mock.Anything, mock.Anything).Return(&abci.ResponseCheckTx{}, nil)
+	app.On("PrepareProposal", mock.Anything, mock.Anything).Return(prepareProposalResponse).Maybe()
+	app.On("ProcessProposal", mock.Anything, mock.Anything).Return(&abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil)
+	app.On("FinalizeBlock", mock.Anything, mock.Anything).Return(&abci.ResponseFinalizeBlock{AppHash: []byte{1, 2, 3, 4}}, nil)
+	app.On("Commit", mock.Anything, mock.Anything).Return(&abci.ResponseCommit{}, nil)
+	return app
+}
+
+func prepareProposalResponse(_ context.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+	return &abci.ResponsePrepareProposal{
+		Txs: req.Txs,
+	}, nil
 }
 
 func initProxyApp(clientCreator proxy.ClientCreator, logger log.Logger, metrics *proxy.Metrics) (proxy.AppConns, error) {

@@ -37,6 +37,9 @@ const (
 
 	// MockDANamespace is a sample namespace used by the mock DA client
 	MockDANamespace = "00000000000000000000000000000000000000000000000000deadbeef"
+	// Bitcoin regnet private keys
+	bobPrivateKey      = "5JoQtsKQuH8hC9MyvfJAqo6qmKLm8ePYNucs7tPu2YxG12trzBt"
+	internalPrivateKey = "5JGgKfRy6vEcWBpLJV5FXUfMGNXzvdWzQHUM1rVLEUJfvZUSwvS"
 )
 
 // TestMain does setup and teardown on the test package
@@ -96,16 +99,16 @@ func cleanUpNode(node Node, t *testing.T) {
 }
 
 // initializeAndStartNode initializes and starts a node of the specified type.
-func initAndStartNodeWithCleanup(ctx context.Context, t *testing.T, nodeType NodeType) Node {
-	node, _ := setupTestNode(ctx, t, nodeType)
+func initAndStartNodeWithCleanup(ctx context.Context, t *testing.T, nodeType NodeType, aggregatorMode bool) Node {
+	node, _ := setupTestNode(ctx, t, nodeType, aggregatorMode, "")
 	startNodeWithCleanup(t, node)
 
 	return node
 }
 
 // setupTestNode sets up a test node based on the NodeType.
-func setupTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, ed25519.PrivKey) {
-	node, privKey, err := newTestNode(ctx, t, nodeType)
+func setupTestNode(ctx context.Context, t *testing.T, nodeType NodeType, aggregatorMode bool, chainId string) (Node, ed25519.PrivKey) {
+	node, privKey, err := newTestNode(ctx, t, nodeType, aggregatorMode, chainId)
 	require.NoError(t, err)
 	require.NotNil(t, node)
 
@@ -113,20 +116,21 @@ func setupTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, 
 }
 
 // newTestNode creates a new test node based on the NodeType.
-func newTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, ed25519.PrivKey, error) {
+func newTestNode(ctx context.Context, t *testing.T, nodeType NodeType, aggregatorMode bool, chainId string) (Node, ed25519.PrivKey, error) {
 	config := config.NodeConfig{
 		DAAddress:   MockDAAddress,
 		DANamespace: MockDANamespace,
 		BitcoinManagerConfig: config.BitcoinManagerConfig{
-			BtcHost:         "localhost:18443",
-			BtcUser:         "regtest",
-			BtcPass:         "regtest",
-			BtcHTTPPostMode: true,
-			BtcDisableTLS:   true,
+			BtcSignerPriv:         bobPrivateKey,
+			BtcSignerInternalPriv: internalPrivateKey,
+			BtcHost:               "localhost:18443",
+			BtcUser:               "regtest",
+			BtcPass:               "regtest",
+			BtcHTTPPostMode:       true,
+			BtcDisableTLS:         true,
+			BtcBlockTime:          3 * time.Second,
 		},
-		BlockManagerConfig: config.BlockManagerConfig{
-			BtcBlockTime: 3 * time.Second,
-		},
+		Aggregator: aggregatorMode,
 	}
 
 	switch nodeType {
@@ -138,7 +142,7 @@ func newTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, ed
 		panic(fmt.Sprintf("invalid node type: %v", nodeType))
 	}
 	app := setupMockApplication()
-	genesis, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesis, genesisValidatorKey := types.GetGenesisWithPrivkey(chainId)
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	if err != nil {
 		return nil, nil, err
@@ -154,8 +158,8 @@ func newTestNode(ctx context.Context, t *testing.T, nodeType NodeType) (Node, ed
 func TestNewNode(t *testing.T) {
 	ctx := context.Background()
 
-	ln := initAndStartNodeWithCleanup(ctx, t, Light)
+	ln := initAndStartNodeWithCleanup(ctx, t, Light, false)
 	require.IsType(t, new(LightNode), ln)
-	fn := initAndStartNodeWithCleanup(ctx, t, Full)
+	fn := initAndStartNodeWithCleanup(ctx, t, Full, false)
 	require.IsType(t, new(FullNode), fn)
 }

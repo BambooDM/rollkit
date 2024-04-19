@@ -9,7 +9,7 @@ import (
 	"github.com/rollkit/rollkit/third_party/log"
 )
 
-func InitBitcoinClient(nodeConfig config.NodeConfig, logger log.Logger) (*bitcoin.BitcoinClient, error) {
+func InitBitcoinClient(nodeConfig config.NodeConfig, logger log.Logger, chainId string) (*bitcoin.BitcoinClient, error) {
 	connCfg := &rpcclient.ConnConfig{
 		Host:         nodeConfig.BtcHost,
 		User:         nodeConfig.BtcUser,
@@ -27,6 +27,7 @@ func InitBitcoinClient(nodeConfig config.NodeConfig, logger log.Logger) (*bitcoi
 	// create a new bitcoin client
 	bitcoinClient := &bitcoin.BitcoinClient{
 		Logger:    logger,
+		ChainId:   chainId,
 		BtcClient: btcClient,
 	}
 

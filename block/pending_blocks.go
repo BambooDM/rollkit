@@ -83,6 +83,8 @@ func (pb *PendingBlocks) getPendingBtcRollupsProofs(ctx context.Context) ([]*btc
 	lastSubmitted := pb.lastBtcSubmittedHeight.Load()
 	height := pb.store.BtcRollupsProofsHeight()
 
+	fmt.Printf("lastSubmitted: %d, height: %d\n", lastSubmitted, height)
+
 	if lastSubmitted == height {
 		return nil, nil
 	}

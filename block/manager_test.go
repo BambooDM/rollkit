@@ -53,7 +53,7 @@ func getBlockBiggerThan(blockHeight, limit uint64) (*types.Block, error) {
 
 func TestInitialStateClean(t *testing.T) {
 	require := require.New(t)
-	genesisDoc, _ := types.GetGenesisWithPrivkey()
+	genesisDoc, _ := types.GetGenesisWithPrivkey("")
 	genesis := &cmtypes.GenesisDoc{
 		ChainID:       "myChain",
 		InitialHeight: 1,
@@ -70,7 +70,7 @@ func TestInitialStateClean(t *testing.T) {
 
 func TestInitialStateStored(t *testing.T) {
 	require := require.New(t)
-	genesisDoc, _ := types.GetGenesisWithPrivkey()
+	genesisDoc, _ := types.GetGenesisWithPrivkey("")
 	genesis := &cmtypes.GenesisDoc{
 		ChainID:       "myChain",
 		InitialHeight: 1,
@@ -98,7 +98,7 @@ func TestInitialStateStored(t *testing.T) {
 
 func TestInitialStateUnexpectedHigherGenesis(t *testing.T) {
 	require := require.New(t)
-	genesisDoc, _ := types.GetGenesisWithPrivkey()
+	genesisDoc, _ := types.GetGenesisWithPrivkey("")
 	genesis := &cmtypes.GenesisDoc{
 		ChainID:       "myChain",
 		InitialHeight: 2,
@@ -418,7 +418,7 @@ func Test_isProposer(t *testing.T) {
 		{
 			name: "Signing key matches genesis proposer public key",
 			args: func() args {
-				genesisData, privKey := types.GetGenesisWithPrivkey()
+				genesisData, privKey := types.GetGenesisWithPrivkey("")
 				signingKey, err := types.PrivKeyToSigningKey(privKey)
 				require.NoError(err)
 				return args{
@@ -432,7 +432,7 @@ func Test_isProposer(t *testing.T) {
 		{
 			name: "Signing key does not match genesis proposer public key",
 			args: func() args {
-				genesisData, _ := types.GetGenesisWithPrivkey()
+				genesisData, _ := types.GetGenesisWithPrivkey("")
 				randomPrivKey := ed25519.GenPrivKey()
 				signingKey, err := types.PrivKeyToSigningKey(randomPrivKey)
 				require.NoError(err)
@@ -447,7 +447,7 @@ func Test_isProposer(t *testing.T) {
 		{
 			name: "No validators found in genesis",
 			args: func() args {
-				genesisData, privKey := types.GetGenesisWithPrivkey()
+				genesisData, privKey := types.GetGenesisWithPrivkey("")
 				genesisData.Validators = nil
 				signingKey, err := types.PrivKeyToSigningKey(privKey)
 				require.NoError(err)

@@ -305,7 +305,7 @@ func GetValidatorSetFromGenesis(g *cmtypes.GenesisDoc) cmtypes.ValidatorSet {
 }
 
 // GetGenesisWithPrivkey returns a genesis doc with a single validator and a signing key
-func GetGenesisWithPrivkey() (*cmtypes.GenesisDoc, ed25519.PrivKey) {
+func GetGenesisWithPrivkey(chainId string) (*cmtypes.GenesisDoc, ed25519.PrivKey) {
 	genesisValidatorKey := ed25519.GenPrivKey()
 	pubKey := genesisValidatorKey.PubKey()
 
@@ -315,8 +315,14 @@ func GetGenesisWithPrivkey() (*cmtypes.GenesisDoc, ed25519.PrivKey) {
 		Power:   int64(1),
 		Name:    "sequencer",
 	}}
+
+	if chainId == "" {
+		// randomize a number for 1 to 1000
+		chainId = TestChainID
+	}
+
 	genDoc := &cmtypes.GenesisDoc{
-		ChainID:       TestChainID,
+		ChainID:       chainId,
 		InitialHeight: 0,
 		Validators:    genesisValidators,
 	}
