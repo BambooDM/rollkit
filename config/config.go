@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	cmcfg "github.com/cometbft/cometbft/config"
 
 	"github.com/spf13/cobra"
@@ -56,6 +57,8 @@ type NodeConfig struct {
 	Instrumentation    *cmcfg.InstrumentationConfig `mapstructure:"instrumentation"`
 	DAGasPrice         float64                      `mapstructure:"da_gas_price"`
 	DAGasMultiplier    float64                      `mapstructure:"da_gas_multiplier"`
+	// parameters for bitcoin layer
+	BitcoinManagerConfig `mapstructure:",squash"`
 
 	// CLI flags
 	DANamespace string `mapstructure:"da_namespace"`
@@ -79,6 +82,30 @@ type BlockManagerConfig struct {
 	// MaxPendingBlocks defines limit of blocks pending DA submission. 0 means no limit.
 	// When limit is reached, aggregator pauses block production.
 	MaxPendingBlocks uint64 `mapstructure:"max_pending_blocks"`
+}
+
+// BitcoinManagerConfig consists of all parameters required to setup bitcoin client
+type BitcoinManagerConfig struct {
+	// BtcHost is the IP address and port of the RPC server you want to connect to.
+	BtcHost string `mapstructure:"btc_host"`
+	// BtcUser is the username to use to authenticate to the RPC server.
+	BtcUser string `mapstructure:"btc_user"`
+	// BtcPass is the passphrase to use to authenticate to the RPC server.
+	BtcPass string `mapstructure:"btc_pass"`
+	// BtcHTTPPostMode instructs the client to run using multiple independent connections issuing HTTP POST requests instead of using the default of websockets. Websockets are generally preferred as some of the features of the client such notifications only work with websockets, however, not all servers support the websocket extensions, so this flag can be set to true to use basic HTTP POST requests instead.
+	BtcHTTPPostMode bool `mapstructure:"btc_http_post_mode"`
+	// BtcDisableTLS specifies whether transport layer security should be disabled. It is recommended to always use TLS if the RPC server supports it as otherwise your username and password is sent across the wire in cleartext.
+	BtcDisableTLS bool `mapstructure:"btc_disable_tls"`
+	// BtcBlockTime defines how often new Bitcoin blocks are produced
+	BtcBlockTime time.Duration `mapstructure:"btc_block_time"`
+	// BtcStartHeight allows skipping first BtcStartHeight-1 blocks when querying for Bitcoin blocks.
+	BtcStartHeight uint64 `mapstructure:"btc_start_height"`
+	// Btc signer private
+	BtcSignerPriv string `mapstructure:"btc_signer_priv"`
+	// Btc signer internal private
+	BtcSignerInternalPriv string `mapstructure:"btc_signer_internal_priv"`
+	// Btc network configurations params
+	BtcNetworkParams *chaincfg.Params `mapstructure:",squash"`
 }
 
 // GetNodeConfig translates Tendermint's configuration into Rollkit configuration.

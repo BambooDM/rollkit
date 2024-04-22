@@ -18,18 +18,21 @@ import (
 )
 
 var (
-	blockPrefix     = "b"
-	indexPrefix     = "i"
-	commitPrefix    = "c"
-	statePrefix     = "s"
-	responsesPrefix = "r"
-	metaPrefix      = "m"
+	blockPrefix          = "b"
+	indexPrefix          = "i"
+	commitPrefix         = "c"
+	statePrefix          = "s"
+	responsesPrefix      = "r"
+	metaPrefix           = "m"
+	btcProofsPrefix      = "bp"
+	btcProofsIndexPrefix = "bi"
 )
 
 // DefaultStore is a default store implmementation.
 type DefaultStore struct {
-	db     ds.TxnDatastore
-	height atomic.Uint64
+	db                     ds.TxnDatastore
+	height                 atomic.Uint64
+	btcRollupsProofsHeight atomic.Uint64
 }
 
 var _ Store = &DefaultStore{}

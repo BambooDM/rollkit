@@ -29,6 +29,7 @@ import (
 	"github.com/rollkit/rollkit/block"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/da/bitcoin"
 	"github.com/rollkit/rollkit/mempool"
 	"github.com/rollkit/rollkit/p2p"
 	"github.com/rollkit/rollkit/state"
@@ -69,6 +70,7 @@ type FullNode struct {
 	proxyApp     proxy.AppConns
 	eventBus     *cmtypes.EventBus
 	dalc         *da.DAClient
+	btc          *bitcoin.BitcoinClient
 	p2pClient    *p2p.Client
 	hSyncService *block.HeaderSyncService
 	bSyncService *block.BlockSyncService
@@ -136,6 +138,20 @@ func newFullNode(
 		return nil, err
 	}
 
+	btc, err := InitBitcoinClient(nodeConfig, logger, genesis.ChainID)
+	if err != nil {
+		return nil, err
+	}
+
+	// if btc start height is zero, set it to the current height of bitcoin network
+	if nodeConfig.BitcoinManagerConfig.BtcStartHeight == 0 {
+		currentBtcHeight, err := btc.BtcClient.GetBlockCount()
+		if err != nil {
+			return nil, err
+		}
+		nodeConfig.BitcoinManagerConfig.BtcStartHeight = uint64(currentBtcHeight)
+	}
+
 	p2pClient, err := p2p.NewClient(nodeConfig.P2P, p2pKey, genesis.ChainID, baseKV, logger.With("module", "p2p"), p2pMetrics)
 	if err != nil {
 		return nil, err
@@ -155,7 +171,7 @@ func newFullNode(
 	mempool := initMempool(logger, proxyApp, memplMetrics)
 
 	store := store.New(mainKV)
-	blockManager, err := initBlockManager(signingKey, nodeConfig, genesis, store, mempool, proxyApp, dalc, eventBus, logger, blockSyncService, seqMetrics, smMetrics)
+	blockManager, err := initBlockManager(signingKey, nodeConfig, genesis, store, mempool, proxyApp, dalc, btc, eventBus, logger, blockSyncService, seqMetrics, smMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +190,7 @@ func newFullNode(
 		p2pClient:      p2pClient,
 		blockManager:   blockManager,
 		dalc:           dalc,
+		btc:            btc,
 		Mempool:        mempool,
 		mempoolIDs:     newMempoolIDs(),
 		Store:          store,
@@ -263,8 +280,8 @@ func initBlockSyncService(ctx context.Context, mainKV ds.TxnDatastore, nodeConfi
 	return blockSyncService, nil
 }
 
-func initBlockManager(signingKey crypto.PrivKey, nodeConfig config.NodeConfig, genesis *cmtypes.GenesisDoc, store store.Store, mempool mempool.Mempool, proxyApp proxy.AppConns, dalc *da.DAClient, eventBus *cmtypes.EventBus, logger log.Logger, blockSyncService *block.BlockSyncService, seqMetrics *block.Metrics, execMetrics *state.Metrics) (*block.Manager, error) {
-	blockManager, err := block.NewManager(signingKey, nodeConfig.BlockManagerConfig, genesis, store, mempool, proxyApp.Consensus(), dalc, eventBus, logger.With("module", "BlockManager"), blockSyncService.BlockStore(), seqMetrics, execMetrics)
+func initBlockManager(signingKey crypto.PrivKey, nodeConfig config.NodeConfig, genesis *cmtypes.GenesisDoc, store store.Store, mempool mempool.Mempool, proxyApp proxy.AppConns, dalc *da.DAClient, btc *bitcoin.BitcoinClient, eventBus *cmtypes.EventBus, logger log.Logger, blockSyncService *block.BlockSyncService, seqMetrics *block.Metrics, execMetrics *state.Metrics) (*block.Manager, error) {
+	blockManager, err := block.NewManager(signingKey, nodeConfig.BlockManagerConfig, nodeConfig.BitcoinManagerConfig, genesis, store, mempool, proxyApp.Consensus(), dalc, btc, eventBus, logger.With("module", "BlockManager"), blockSyncService.BlockStore(), seqMetrics, execMetrics)
 	if err != nil {
 		return nil, fmt.Errorf("error while initializing BlockManager: %w", err)
 	}
@@ -388,11 +405,13 @@ func (n *FullNode) OnStart() error {
 		n.Logger.Info("working in aggregator mode", "block time", n.nodeConfig.BlockTime)
 		n.threadManager.Go(func() { n.blockManager.AggregationLoop(n.ctx, n.nodeConfig.LazyAggregator) })
 		n.threadManager.Go(func() { n.blockManager.BlockSubmissionLoop(n.ctx) })
+		n.threadManager.Go(func() { n.blockManager.BtcBlockSubmissionLoop(n.ctx) })
 		n.threadManager.Go(func() { n.headerPublishLoop(n.ctx) })
 		n.threadManager.Go(func() { n.blockPublishLoop(n.ctx) })
 		return nil
 	}
 	n.threadManager.Go(func() { n.blockManager.RetrieveLoop(n.ctx) })
+	n.threadManager.Go(func() { n.blockManager.BtcRetrieveLoop(n.ctx) })
 	n.threadManager.Go(func() { n.blockManager.BlockStoreRetrieveLoop(n.ctx) })
 	n.threadManager.Go(func() { n.blockManager.SyncLoop(n.ctx, n.cancel) })
 	return nil

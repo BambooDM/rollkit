@@ -12,10 +12,12 @@ import (
 	"github.com/rollkit/rollkit/store"
 	"github.com/rollkit/rollkit/third_party/log"
 	"github.com/rollkit/rollkit/types"
+	btctypes "github.com/rollkit/rollkit/types/pb/bitcoin"
 )
 
 // LastSubmittedHeightKey is the key used for persisting the last submitted height in store.
 const LastSubmittedHeightKey = "last submitted"
+const LastSubmittedBtcProofsHeightKey = "last submitted btc"
 
 // PendingBlocks maintains blocks that need to be published to DA layer
 //
@@ -29,12 +31,14 @@ const LastSubmittedHeightKey = "last submitted"
 // restarted, networking issue occurred). In this case blocks are re-submitted to DA (it's extra cost).
 // rollkit is able to skip duplicate blocks so this shouldn't affect full nodes.
 // TODO(tzdybal): we shouldn't try to push all pending blocks at once; this should depend on max blob size
+// Bitcoin block store can re - use current code to track, organize and submit proofs to bitcoin layer
 type PendingBlocks struct {
 	store  store.Store
 	logger log.Logger
 
 	// lastSubmittedHeight holds information about last block successfully submitted to DA
-	lastSubmittedHeight atomic.Uint64
+	lastSubmittedHeight    atomic.Uint64
+	lastBtcSubmittedHeight atomic.Uint64
 }
 
 // NewPendingBlocks returns a new PendingBlocks struct
@@ -75,12 +79,57 @@ func (pb *PendingBlocks) getPendingBlocks(ctx context.Context) ([]*types.Block, 
 	return blocks, nil
 }
 
+func (pb *PendingBlocks) getPendingBtcRollupsProofs(ctx context.Context) ([]*btctypes.RollUpsBlock, error) {
+	lastSubmitted := pb.lastBtcSubmittedHeight.Load()
+	height := pb.store.BtcRollupsProofsHeight()
+
+	fmt.Printf("lastSubmitted: %d, height: %d\n", lastSubmitted, height)
+
+	if lastSubmitted == height {
+		return nil, nil
+	}
+	if lastSubmitted > height {
+		panic(fmt.Sprintf("height of last block submitted to bitcoin (%d) is greater than height of last block (%d)",
+			lastSubmitted, height))
+	}
+
+	proofs := make([]*btctypes.RollUpsBlock, 0, height-lastSubmitted)
+	for i := lastSubmitted + 1; i <= height; i++ {
+		proof, err := pb.store.GetBtcRollupsProofs(ctx, i)
+		if err != nil {
+			// return as much as possible + error information
+			return proofs, err
+		}
+
+		proofs = append(proofs, proof)
+	}
+	return proofs, nil
+}
+
 func (pb *PendingBlocks) isEmpty() bool {
 	return pb.store.Height() == pb.lastSubmittedHeight.Load()
 }
 
+func (pb *PendingBlocks) isEmptyBtcRollupsProofs() bool {
+	return pb.store.BtcRollupsProofsHeight() == pb.lastBtcSubmittedHeight.Load()
+}
+
 func (pb *PendingBlocks) numPendingBlocks() uint64 {
 	return pb.store.Height() - pb.lastSubmittedHeight.Load()
+}
+
+func (pb *PendingBlocks) setLastBtcProofsSubmittedHeight(ctx context.Context, newLastBtcSubmittedHeight uint64) {
+	lsh := pb.lastBtcSubmittedHeight.Load()
+
+	if newLastBtcSubmittedHeight > lsh && pb.lastBtcSubmittedHeight.CompareAndSwap(lsh, newLastBtcSubmittedHeight) {
+		err := pb.store.SetMetadata(ctx, LastSubmittedBtcProofsHeightKey, []byte(strconv.FormatUint(newLastBtcSubmittedHeight, 10)))
+		if err != nil {
+			// This indicates IO error in KV store. We can't do much about this.
+			// After next successful DA submission, update will be re-attempted (with new value).
+			// If store is not updated, after node restart some blocks will be re-submitted to DA.
+			pb.logger.Error("failed to store height of latest proofs submitted to bitcoin", "err", err)
+		}
+	}
 }
 
 func (pb *PendingBlocks) setLastSubmittedHeight(ctx context.Context, newLastSubmittedHeight uint64) {

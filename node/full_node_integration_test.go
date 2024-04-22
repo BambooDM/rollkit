@@ -55,7 +55,7 @@ func TestAggregatorMode(t *testing.T) {
 	app.On("Commit", mock.Anything, mock.Anything).Return(&abci.ResponseCommit{}, nil)
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	blockManagerConfig := config.BlockManagerConfig{
@@ -63,7 +63,15 @@ func TestAggregatorMode(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := newFullNode(ctx, config.NodeConfig{DAAddress: MockDAAddress, DANamespace: MockDANamespace, Aggregator: true, BlockManagerConfig: blockManagerConfig}, key, signingKey, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
+	node, err := newFullNode(ctx, config.NodeConfig{DAAddress: MockDAAddress, DANamespace: MockDANamespace, Aggregator: true, BlockManagerConfig: blockManagerConfig,
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
+			BtcBlockTime:    3 * time.Second,
+		}}, key, signingKey, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
@@ -169,7 +177,7 @@ func TestLazyAggregator(t *testing.T) {
 	app.On("Commit", mock.Anything, mock.Anything).Return(&abci.ResponseCommit{}, nil)
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesisDoc, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(err)
 	blockManagerConfig := config.BlockManagerConfig{
@@ -191,6 +199,14 @@ func TestLazyAggregator(t *testing.T) {
 		Aggregator:         true,
 		BlockManagerConfig: blockManagerConfig,
 		LazyAggregator:     true,
+		BitcoinManagerConfig: config.BitcoinManagerConfig{
+			BtcHost:         "localhost:18443",
+			BtcUser:         "regtest",
+			BtcPass:         "regtest",
+			BtcHTTPPostMode: true,
+			BtcDisableTLS:   true,
+			BtcBlockTime:    3 * time.Second,
+		},
 	}, key, signingKey, proxy.NewLocalClientCreator(app), genesisDoc, DefaultMetricsProvider(cmconfig.DefaultInstrumentationConfig()), log.TestingLogger())
 	assert.False(node.IsRunning())
 	assert.NoError(err)
@@ -857,6 +873,13 @@ func createNode(ctx context.Context, n int, aggregator bool, isLight bool, keys 
 			Aggregator:         aggregator,
 			BlockManagerConfig: bmConfig,
 			Light:              isLight,
+			BitcoinManagerConfig: config.BitcoinManagerConfig{
+				BtcHost:         "localhost:18443",
+				BtcUser:         "regtest",
+				BtcPass:         "regtest",
+				BtcHTTPPostMode: true,
+				BtcDisableTLS:   true,
+			},
 		},
 		keys[n],
 		keys[n],

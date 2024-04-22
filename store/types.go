@@ -10,6 +10,8 @@ import (
 
 // Store is minimal interface for storing and retrieving blocks, commits and state.
 type Store interface {
+	BtcStore
+
 	// Height returns height of the highest block in store.
 	Height() uint64
 

@@ -38,14 +38,14 @@ import (
 // simply check that node is starting and stopping without panicking
 func TestStartup(t *testing.T) {
 	ctx := context.Background()
-	node := initAndStartNodeWithCleanup(ctx, t, Full)
+	node := initAndStartNodeWithCleanup(ctx, t, Full, false)
 	require.IsType(t, new(FullNode), node)
 }
 
 func TestMempoolDirectly(t *testing.T) {
 	ctx := context.Background()
 
-	fn := initAndStartNodeWithCleanup(ctx, t, Full)
+	fn := initAndStartNodeWithCleanup(ctx, t, Full, false)
 	require.IsType(t, new(FullNode), fn)
 
 	node := fn.(*FullNode)
@@ -59,7 +59,7 @@ func TestMempoolDirectly(t *testing.T) {
 func TestTrySyncNextBlockMultiple(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, signingKey := setupTestNode(ctx, t, Full)
+	node, signingKey := setupTestNode(ctx, t, Full, false, "")
 	fullNode, ok := node.(*FullNode)
 	require.True(t, ok)
 
@@ -110,7 +110,7 @@ func TestTrySyncNextBlockMultiple(t *testing.T) {
 func TestInvalidBlocksIgnored(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, signingKey := setupTestNode(ctx, t, Full)
+	node, signingKey := setupTestNode(ctx, t, Full, false, "")
 	fullNode, ok := node.(*FullNode)
 	require.True(t, ok)
 	store := fullNode.Store
@@ -267,7 +267,7 @@ func createAggregatorWithPersistence(ctx context.Context, dbPath string, dalc *d
 	t.Helper()
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	genesis, genesisValidatorKey := types.GetGenesisWithPrivkey()
+	genesis, genesisValidatorKey := types.GetGenesisWithPrivkey("")
 	signingKey, err := types.PrivKeyToSigningKey(genesisValidatorKey)
 	require.NoError(t, err)
 
@@ -285,6 +285,14 @@ func createAggregatorWithPersistence(ctx context.Context, dbPath string, dalc *d
 				DABlockTime: 300 * time.Millisecond,
 			},
 			Light: false,
+			BitcoinManagerConfig: config.BitcoinManagerConfig{
+				BtcHost:         "localhost:18443",
+				BtcUser:         "regtest",
+				BtcPass:         "regtest",
+				BtcHTTPPostMode: true,
+				BtcDisableTLS:   true,
+				BtcBlockTime:    3 * time.Second,
+			},
 		},
 		key,
 		signingKey,
